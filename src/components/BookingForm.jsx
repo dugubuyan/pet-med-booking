@@ -56,7 +56,6 @@ const BookingForm = () => {
       // Store booking data in localStorage for demo purposes
       const bookingData = {
         ...values,
-        bookingId: `PET-${Date.now()}`,
         createdAt: new Date().toISOString(),
       };
       

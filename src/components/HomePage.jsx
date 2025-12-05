@@ -26,7 +26,7 @@ import {
   CheckCircleOutlined,
   RocketOutlined,
   StarOutlined,
-  GlobalOutlined
+  GlobalOutlined,
 } from '@ant-design/icons';
 import { authService } from '../services/authService';
 
@@ -114,7 +114,6 @@ const HomePage = () => {
       petAge: pet.age,
       petBreed: pet.breed || '',
       petWeight: pet.weight || '',
-      bookingId: `PET-${Date.now()}`,
       createdAt: new Date().toISOString(),
     };
     localStorage.setItem('currentBooking', JSON.stringify(bookingData));

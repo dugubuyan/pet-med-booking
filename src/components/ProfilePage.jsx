@@ -65,11 +65,11 @@ const ProfilePage = () => {
   const handleProfileUpdate = async (values) => {
     setLoading(true);
     try {
-      const updatedUser = authService.updateProfile(values);
+      const updatedUser = await authService.updateProfile(values);
       setUser(updatedUser);
       message.success(t('profile.profileUpdated'));
     } catch (error) {
-      message.error(error.message);
+      message.error(error.message || 'Failed to update profile');
     } finally {
       setLoading(false);
     }
@@ -91,30 +91,33 @@ const ProfilePage = () => {
     setLoading(true);
     try {
       if (editingPet) {
-        const updatedUser = authService.updatePet(editingPet.id, values);
+        const updatedUser = await authService.updatePet(editingPet.id, values);
         setUser(updatedUser);
         message.success(t('profile.petUpdated'));
       } else {
-        const updatedUser = authService.addPet(values);
+        const updatedUser = await authService.addPet(values);
         setUser(updatedUser);
         message.success(t('profile.petAdded'));
       }
       setPetModalVisible(false);
       petForm.resetFields();
     } catch (error) {
-      message.error(error.message);
+      message.error(error.message || 'Failed to save pet');
     } finally {
       setLoading(false);
     }
   };
 
   const handleDeletePet = async (petId) => {
+    setLoading(true);
     try {
-      const updatedUser = authService.deletePet(petId);
+      const updatedUser = await authService.deletePet(petId);
       setUser(updatedUser);
       message.success(t('profile.petDeleted'));
     } catch (error) {
-      message.error(error.message);
+      message.error(error.message || 'Failed to delete pet');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -135,7 +138,6 @@ const ProfilePage = () => {
       petAge: pet.age,
       petBreed: pet.breed || '',
       petWeight: pet.weight || '',
-      bookingId: `PET-${Date.now()}`,
       createdAt: new Date().toISOString(),
     };
     

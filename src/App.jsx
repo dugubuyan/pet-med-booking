@@ -7,6 +7,7 @@ import ProfilePage from './components/ProfilePage';
 import BookingForm from './components/BookingForm';
 import VideoCall from './components/VideoCall';
 import AppointmentResults from './components/AppointmentResults';
+import AIChat from './components/AIChat/AIChat';
 import './App.css';
 
 function App() {
@@ -28,6 +29,7 @@ function App() {
             <Route path="/booking" element={<BookingForm />} />
             <Route path="/video-call" element={<VideoCall />} />
             <Route path="/results" element={<AppointmentResults />} />
+            <Route path="/ai-chat" element={<AIChat />} />
           </Routes>
         </div>
       </Router>

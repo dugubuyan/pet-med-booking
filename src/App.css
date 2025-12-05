@@ -42,7 +42,7 @@
 
 .video-container {
   width: 100%;
-  max-width: 1200px;
+  max-width: 1600px;
   background: white;
   border-radius: 16px;
   box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
@@ -59,6 +59,7 @@
 
 .video-content {
   padding: 30px;
+  overflow-x: hidden;
 }
 
 .video-display {
@@ -167,6 +168,21 @@
   
   .captured-images {
     grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  }
+
+  .video-element {
+    height: 300px;
+  }
+}
+
+@media (min-width: 992px) {
+  .video-content .ant-row {
+    display: flex;
+    flex-wrap: nowrap;
+  }
+  
+  .video-content .ant-col {
+    flex-shrink: 0;
   }
 }
 
@@ -434,4 +450,37 @@
 .pet-selection-item:hover {
   background: #f0f2f5;
   transition: background 0.3s ease;
+}
+
+/* Typing Animation for AI Chat */
+@keyframes typing {
+  0%, 60%, 100% {
+    transform: translateY(0);
+    opacity: 0.7;
+  }
+  30% {
+    transform: translateY(-10px);
+    opacity: 1;
+  }
+}
+
+.typing-dots span {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #1890ff;
+  margin: 0 2px;
+}
+
+.typing-dots span:nth-child(1) {
+  animation: typing 1.4s infinite;
+}
+
+.typing-dots span:nth-child(2) {
+  animation: typing 1.4s infinite 0.2s;
+}
+
+.typing-dots span:nth-child(3) {
+  animation: typing 1.4s infinite 0.4s;
 }

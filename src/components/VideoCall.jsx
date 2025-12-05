@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import {
   Button,
   Card,
@@ -11,6 +12,9 @@ import {
   message,
   Row,
   Col,
+  Tooltip,
+  Switch,
+  Image,
 } from 'antd';
 import {
   VideoCameraOutlined,
@@ -19,27 +23,61 @@ import {
   CameraOutlined,
   SoundOutlined,
   CheckCircleOutlined,
+  SendOutlined,
+  AudioMutedOutlined,
+  DeleteOutlined,
 } from '@ant-design/icons';
+import apiService from '../services/apiService';
+import { authService } from '../services/authService';
 
 const { Title, Text } = Typography;
 
 const VideoCall = () => {
+  const { t, i18n } = useTranslation();
   const [isVideoActive, setIsVideoActive] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [capturedImages, setCapturedImages] = useState([]);
   const [transcription, setTranscription] = useState('');
   const [sessionDuration, setSessionDuration] = useState(0);
   const [isListening, setIsListening] = useState(false);
+  const [speechRecognitionEnabled, setSpeechRecognitionEnabled] = useState(false); // User's preference for speech recognition
+  
+  // AI Chat states
+  const [messages, setMessages] = useState([]);
+  const [sessionId, setSessionId] = useState(null);
+  const [isAILoading, setIsAILoading] = useState(false);
+  const [chatInput, setChatInput] = useState('');
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [speechEnabled, setSpeechEnabled] = useState(false); // Start disabled to avoid browser blocking
+  const [speechInitialized, setSpeechInitialized] = useState(false);
   
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const captureIntervalRef = useRef(null);
   const recognitionRef = useRef(null);
   const sessionTimerRef = useRef(null);
+  const speechRecognitionEnabledRef = useRef(false);
+  const sessionIdRef = useRef(null);
+  const chatEndRef = useRef(null);
+  const synthRef = useRef(null);
   const navigate = useNavigate();
 
   useEffect(() => {
-    // Initialize speech recognition
+    // Create session when entering video call page
+    createSession();
+    
+    // Initialize AI chat session
+    initializeAISession();
+    
+    // Initialize speech synthesis
+    if ('speechSynthesis' in window) {
+      synthRef.current = window.speechSynthesis;
+      console.log('Speech synthesis initialized');
+    } else {
+      console.warn('Speech synthesis not supported in this browser');
+    }
+    
+    // Initialize and start speech recognition immediately
     if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
       recognitionRef.current = new SpeechRecognition();
@@ -60,15 +98,20 @@ const VideoCall = () => {
           }
         }
         
-        if (finalTranscript) {
-          setTranscription(prev => prev + finalTranscript);
+        if (finalTranscript && finalTranscript.trim()) {
           console.log('Final transcript:', finalTranscript);
+          setTranscription(prev => prev + finalTranscript);
+          
+          // Auto-submit the message when in voice mode
+          sendMessageToAI(finalTranscript.trim());
         }
       };
 
       recognitionRef.current.onerror = (event) => {
         console.error('Speech recognition error:', event.error);
-        message.error(`Speech recognition error: ${event.error}`);
+        if (event.error !== 'no-speech') {
+          message.error(`Speech recognition error: ${event.error}`);
+        }
         setIsListening(false);
       };
 
@@ -80,6 +123,25 @@ const VideoCall = () => {
       recognitionRef.current.onend = () => {
         console.log('Speech recognition ended');
         setIsListening(false);
+        
+        // Auto-restart if user has enabled speech recognition
+        if (speechRecognitionEnabledRef.current) {
+          try {
+            console.log('Auto-restarting speech recognition...');
+            setTimeout(() => {
+              if (recognitionRef.current && speechRecognitionEnabledRef.current) {
+                try {
+                  recognitionRef.current.start();
+                  console.log('Speech recognition restarted successfully');
+                } catch (err) {
+                  console.error('Error in restart:', err);
+                }
+              }
+            }, 100);
+          } catch (error) {
+            console.error('Error restarting speech recognition:', error);
+          }
+        }
       };
     } else {
       console.warn('Speech recognition not supported in this browser');
@@ -87,8 +149,252 @@ const VideoCall = () => {
 
     return () => {
       stopVideoCall();
+      // Stop any ongoing speech
+      if (synthRef.current) {
+        synthRef.current.cancel();
+      }
     };
   }, []);
+
+  // Sync sessionId to ref for closure access
+  useEffect(() => {
+    sessionIdRef.current = sessionId;
+  }, [sessionId]);
+
+  useEffect(() => {
+    // Auto-scroll chat to bottom
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  const createSession = async () => {
+    try {
+      console.log('Creating new chat session...');
+      const response = await apiService.createChatSession(i18n.language);
+      
+      if (response.success && response.sessionId) {
+        console.log('Session created:', response.sessionId);
+        setSessionId(response.sessionId);
+      }
+    } catch (error) {
+      console.error('Failed to create session:', error);
+      // Continue anyway - session will be created on first message
+    }
+  };
+
+  const initializeAISession = () => {
+    // Show initial greeting immediately (no API call needed)
+    const user = authService.getCurrentUser();
+    let greeting;
+    
+    if (user && user.pets && user.pets.length > 0) {
+      const petName = user.pets[0].name;
+      greeting = `Hello ${user.fullName}! I'm here to help with ${petName}'s health. What brings you in today?`;
+    } else if (user) {
+      greeting = `Hello ${user.fullName}! I'm here to help with your pet's health. What brings you in today?`;
+    } else {
+      greeting = "Hello! I'm here to help with your pet's health. What brings you in today?";
+    }
+    
+    setMessages([{
+      content: greeting,
+      sender: 'assistant',
+      timestamp: new Date()
+    }]);
+    
+    // Don't auto-speak on load - wait for user interaction
+    // The greeting will be spoken when user sends first message or clicks speech button
+  };
+
+  const speakText = (text) => {
+    if (!synthRef.current || !speechEnabled) return;
+    
+    // Cancel any ongoing speech
+    synthRef.current.cancel();
+    
+    const utterance = new SpeechSynthesisUtterance(text);
+    
+    // Set voice properties based on language
+    utterance.lang = i18n.language === 'zh' ? 'zh-CN' : i18n.language === 'sv' ? 'sv-SE' : 'en-US';
+    utterance.rate = 1.0;
+    utterance.pitch = 1.0;
+    utterance.volume = 1.0;
+    
+    utterance.onstart = () => {
+      console.log('Speech started');
+      setIsSpeaking(true);
+    };
+    
+    utterance.onend = () => {
+      console.log('Speech ended');
+      setIsSpeaking(false);
+    };
+    
+    utterance.onerror = (event) => {
+      console.error('Speech error:', event);
+      setIsSpeaking(false);
+    };
+    
+    synthRef.current.speak(utterance);
+  };
+
+  const toggleSpeech = () => {
+    const newState = !speechEnabled;
+    setSpeechEnabled(newState);
+    
+    if (!newState && synthRef.current) {
+      // Disabling speech - cancel any ongoing speech
+      synthRef.current.cancel();
+      setIsSpeaking(false);
+    } else if (newState && !speechInitialized) {
+      // First time enabling - initialize with a test utterance
+      setSpeechInitialized(true);
+      if (synthRef.current) {
+        // Speak a short welcome to initialize
+        const testUtterance = new SpeechSynthesisUtterance('Speech enabled');
+        testUtterance.volume = 0.5;
+        synthRef.current.speak(testUtterance);
+      }
+    }
+    
+    message.success(newState ? 'Speech enabled - AI will speak responses' : 'Speech disabled');
+  };
+
+  const sendMessageToAI = async (messageText) => {
+    if (!messageText.trim() || isAILoading) {
+      return;
+    }
+
+    const userMessage = {
+      content: messageText.trim(),
+      sender: 'user',
+      timestamp: new Date()
+    };
+    
+    setMessages(prev => [...prev, userMessage]);
+    setIsAILoading(true);
+
+    try {
+      const user = authService.getCurrentUser();
+      const userContext = getUserContext(user);
+      
+      // Use ref to get current sessionId value
+      const currentSessionId = sessionIdRef.current;
+      console.log('Sending message with sessionId:', currentSessionId);
+      
+      const response = await apiService.sendChatMessage(
+        messageText.trim(),
+        currentSessionId,
+        userContext,
+        i18n.language
+      );
+      
+      if (response.sessionId && response.sessionId !== currentSessionId) {
+        console.log('Received new sessionId from backend:', response.sessionId);
+        setSessionId(response.sessionId);
+        sessionIdRef.current = response.sessionId;
+      }
+      
+      const assistantMessage = {
+        content: response.response,
+        sender: 'assistant',
+        timestamp: new Date(response.timestamp)
+      };
+      
+      setMessages(prev => [...prev, assistantMessage]);
+      speakText(response.response);
+      
+      // If appointment was booked, store the bookingId
+      if (response.appointmentBooked && response.bookingId) {
+        console.log('✅ Appointment booked in VideoCall! BookingId:', response.bookingId);
+        localStorage.setItem('currentBookingId', response.bookingId);
+        message.success(`Appointment booked! ID: ${response.bookingId}`);
+      }
+    } catch (err) {
+      console.error('Failed to send message:', err);
+      
+      const errorMsg = {
+        content: "I'm sorry, I'm having trouble connecting right now. Please try again.",
+        sender: 'assistant',
+        timestamp: new Date(),
+        isError: true
+      };
+      
+      setMessages(prev => [...prev, errorMsg]);
+    } finally {
+      setIsAILoading(false);
+    }
+  };
+
+  const getUserContext = (user) => {
+    if (!user) {
+      return {
+        userId: null,
+        isGuest: true,
+        ownerInfo: {},
+        petInfo: {},
+        features: {
+          canBookAppointment: true,
+          hasImageCapture: capturedImages.length > 0,
+          imageCount: capturedImages.length
+        }
+      };
+    }
+
+    const context = {
+      userId: user.id,
+      isGuest: false,
+      ownerInfo: {
+        name: user.fullName,
+        phone: user.phone,
+        email: user.email
+      },
+      petInfo: {},
+      features: {
+        canBookAppointment: true,
+        hasImageCapture: capturedImages.length > 0,
+        imageCount: capturedImages.length
+      }
+    };
+
+    // Add all available pets
+    if (user.pets && user.pets.length > 0) {
+      context.petInfo.availablePets = user.pets.map(pet => ({
+        id: pet.id,
+        name: pet.name,
+        type: pet.type,
+        age: pet.age,
+        breed: pet.breed,
+        weight: pet.weight
+      }));
+      
+      // Use first pet as current pet if available
+      const firstPet = user.pets[0];
+      context.petInfo.currentPet = {
+        id: firstPet.id,
+        name: firstPet.name,
+        type: firstPet.type,
+        age: firstPet.age,
+        breed: firstPet.breed,
+        weight: firstPet.weight
+      };
+    }
+
+    return context;
+  };
+
+  const handleSendAIMessage = async () => {
+    console.log('handleSendAIMessage called, chatInput:', chatInput);
+    
+    if (!chatInput.trim() || isAILoading) {
+      console.log('Returning early - empty input or loading');
+      return;
+    }
+
+    const messageText = chatInput.trim();
+    setChatInput(''); // Clear input immediately
+    
+    await sendMessageToAI(messageText);
+  };
 
   const startVideoCall = async () => {
     try {
@@ -103,7 +409,14 @@ const VideoCall = () => {
       }
       
       setIsVideoActive(true);
-      message.success('Video call started successfully!');
+      
+      // Start automatic image capture every 20 seconds
+      captureIntervalRef.current = setInterval(() => {
+        console.log('Auto-capturing image...');
+        captureImage();
+      }, 20000);
+      
+      message.success('Video started! Auto-capture enabled every 20 seconds.');
     } catch (error) {
       console.error('Error accessing camera:', error);
       message.error('Failed to access camera. Please check permissions.');
@@ -135,37 +448,72 @@ const VideoCall = () => {
     setIsListening(false);
   };
 
-  const startRecording = () => {
-    if (!isVideoActive) {
-      message.warning('Please start the video call first.');
+  const toggleSpeechRecognition = () => {
+    if (!recognitionRef.current) {
+      message.warning('Speech recognition not supported in this browser');
       return;
     }
 
-    setIsRecording(true);
-    setSessionDuration(0);
-    
-    // Start session timer
-    sessionTimerRef.current = setInterval(() => {
-      setSessionDuration(prev => prev + 1);
-    }, 1000);
-
-    // Start automatic image capture every 20 seconds
-    captureIntervalRef.current = setInterval(() => {
-      captureImage();
-    }, 20000);
-
-    // Start speech recognition
-    if (recognitionRef.current) {
+    if (isListening) {
+      try {
+        recognitionRef.current.stop();
+        console.log('Stopping speech recognition...');
+      } catch (error) {
+        console.error('Error stopping speech recognition:', error);
+      }
+    } else {
       try {
         recognitionRef.current.start();
         console.log('Starting speech recognition...');
+        message.success('Speech recognition started. Speak to input text.');
       } catch (error) {
         console.error('Error starting speech recognition:', error);
         message.error('Failed to start speech recognition');
       }
     }
+  };
 
-    message.success('Recording started! Images will be captured every 20 seconds.');
+  const startRecording = () => {
+    console.log('startRecording called, isVideoActive:', isVideoActive);
+    
+    if (!isVideoActive) {
+      message.warning('Please start the video call first.');
+      return;
+    }
+
+    console.log('Setting isRecording to true');
+    setIsRecording(true);
+    setSessionDuration(0);
+    
+    // Start session timer
+    sessionTimerRef.current = setInterval(() => {
+      setSessionDuration(prev => {
+        console.log('Session duration:', prev + 1);
+        return prev + 1;
+      });
+    }, 1000);
+
+    // Start automatic image capture every 20 seconds
+    captureIntervalRef.current = setInterval(() => {
+      console.log('Auto-capturing image...');
+      captureImage();
+    }, 20000);
+
+    // Start speech recognition
+    if (recognitionRef.current && !isListening) {
+      try {
+        recognitionRef.current.start();
+        console.log('Speech recognition started with recording');
+        message.success('Recording started! Speech recognition and image capture enabled.');
+      } catch (error) {
+        console.error('Error starting speech recognition:', error);
+        message.success('Recording started! Images will be captured every 20 seconds.');
+      }
+    } else {
+      message.success('Recording started! Images will be captured every 20 seconds.');
+    }
+
+    console.log('Recording started successfully');
   };
 
   const stopRecording = () => {
@@ -222,18 +570,43 @@ const VideoCall = () => {
     stopRecording();
     stopVideoCall();
     
+    // Compile AI conversation summary
+    const aiConversation = messages
+      .filter(msg => msg.sender === 'user')
+      .map(msg => msg.content)
+      .join(' ');
+    
     // Save session data
     const sessionData = {
       capturedImages,
-      transcription,
+      transcription: aiConversation || transcription,
       sessionDuration,
       endTime: new Date().toISOString(),
+      aiMessages: messages,
+      sessionId
     };
     
     localStorage.setItem('sessionData', JSON.stringify(sessionData));
     message.success('Consultation completed! Redirecting to results...');
     
     setTimeout(() => {
+      // Get bookingId from localStorage if available
+      const bookingId = localStorage.getItem('currentBookingId');
+      if (bookingId) {
+        navigate(`/results?bookingId=${bookingId}`);
+        return;
+      }
+      
+      // Fallback: check old format
+      const booking = localStorage.getItem('currentBooking');
+      if (booking) {
+        const bookingInfo = JSON.parse(booking);
+        if (bookingInfo.bookingId) {
+          navigate(`/results?bookingId=${bookingInfo.bookingId}`);
+          return;
+        }
+      }
+      
       navigate('/results');
     }, 1500);
   };
@@ -248,23 +621,30 @@ const VideoCall = () => {
     <div className="video-container">
       <div className="video-header">
         <Title level={2} style={{ color: 'white', margin: 0 }}>
-          Pet Video Consultation
+          Pet Video Consultation with AI Assistant
         </Title>
         <Text style={{ color: 'rgba(255, 255, 255, 0.9)' }}>
-          Get AI-assisted preliminary assessment and book real veterinary hospital appointments
+          Capture images through video while chatting with our AI veterinary assistant
         </Text>
       </div>
 
       <div className="video-content">
         <Alert
-          message="Comprehensive Pet Care Service"
+          message="AI-Assisted Video Consultation"
           description={
             <div>
-              <p style={{ marginBottom: '8px' }}><strong>What you'll get after this consultation:</strong></p>
+              <p style={{ marginBottom: '8px' }}><strong>How to start:</strong></p>
+              <ol style={{ marginBottom: '8px', paddingLeft: '20px' }}>
+                <li>Click <strong>"Start Video"</strong> to enable your camera</li>
+                <li>Toggle the <strong>Speech Recognition switch</strong> to enable voice input (or use manual text input)</li>
+                <li>Chat with the AI assistant and capture images of your pet</li>
+                <li>Click <strong>"End Consultation"</strong> when finished</li>
+              </ol>
+              <p style={{ marginBottom: '8px' }}><strong>Features:</strong></p>
               <ul style={{ marginBottom: '8px', paddingLeft: '20px' }}>
-                <li>🤖 <strong>AI-Assisted Preliminary Assessment</strong> - Instant analysis of your pet's condition</li>
-                <li>🏥 <strong>Real Veterinary Hospital Booking</strong> - Schedule appointments with licensed veterinarians</li>
-                <li>📧 <strong>Email Confirmation</strong> - Logged-in users receive appointment details via email</li>
+                <li>📹 <strong>Video Capture</strong> - Click "Capture Now" or automatic capture every 20 seconds</li>
+                <li>🎤 <strong>Speech Recognition</strong> - Toggle switch to speak or type manually</li>
+                <li>🤖 <strong>AI Assistant</strong> - Get real-time guidance on pet health concerns</li>
               </ul>
               <p style={{ margin: 0, fontSize: '12px', color: '#666' }}>
                 <em>Note: AI assessment is preliminary only. Professional veterinary consultation is recommended for accurate diagnosis.</em>
@@ -277,8 +657,8 @@ const VideoCall = () => {
           style={{ marginBottom: '24px' }}
         />
         
-        <Row gutter={24}>
-          <Col xs={24} lg={16}>
+        <Row gutter={24} style={{ flexWrap: 'wrap' }}>
+          <Col xs={24} lg={12} xl={13}>
             <Card>
               <div className="video-display">
                 <video
@@ -315,26 +695,6 @@ const VideoCall = () => {
                   </Button>
                 ) : (
                   <Space size="large">
-                    {!isRecording ? (
-                      <Button
-                        type="primary"
-                        size="large"
-                        icon={<AudioOutlined />}
-                        onClick={startRecording}
-                      >
-                        Start Recording
-                      </Button>
-                    ) : (
-                      <Button
-                        danger
-                        size="large"
-                        icon={<StopOutlined />}
-                        onClick={stopRecording}
-                      >
-                        Stop Recording
-                      </Button>
-                    )}
-                    
                     <Button
                       size="large"
                       icon={<CameraOutlined />}
@@ -343,146 +703,340 @@ const VideoCall = () => {
                     >
                       Capture Now
                     </Button>
-                    
-                    <Button
-                      size="large"
-                      icon={<CheckCircleOutlined />}
-                      onClick={endConsultation}
-                      type="primary"
-                      style={{ backgroundColor: '#52c41a' }}
-                    >
-                      End Consultation
-                    </Button>
                   </Space>
                 )}
               </div>
             </Card>
-          </Col>
 
-          <Col xs={24} lg={8}>
-            <Space direction="vertical" style={{ width: '100%' }} size="large">
-              {/* Session Status */}
-              <Card title="Session Status" size="small">
-                <Space direction="vertical" style={{ width: '100%' }}>
-                  <div className={`status-indicator ${isRecording ? 'status-recording' : 'status-active'}`}>
-                    <SoundOutlined />
-                    {isRecording ? 'Recording Active' : 'Ready to Record'}
-                  </div>
-                  
-                  {isRecording && (
-                    <div>
-                      <Text strong>Duration: {formatDuration(sessionDuration)}</Text>
-                      <Progress
-                        percent={Math.min((sessionDuration / 300) * 100, 100)}
-                        size="small"
-                        status="active"
+            {/* Captured Images */}
+            {capturedImages.length > 0 && (
+              <Card 
+                title={`Captured Images (${capturedImages.length})`}
+                style={{ marginTop: '20px' }}
+              >
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))',
+                  gap: '12px'
+                }}>
+                  {capturedImages.map((img, index) => (
+                    <div 
+                      key={img.id}
+                      style={{
+                        position: 'relative',
+                        borderRadius: '8px',
+                        overflow: 'hidden',
+                        boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+                      }}
+                    >
+                      <Image
+                        src={img.data}
+                        alt={`Capture ${index + 1}`}
+                        style={{
+                          width: '100%',
+                          height: '120px',
+                          objectFit: 'cover'
+                        }}
                       />
-                    </div>
-                  )}
-                  
-                  <Text type="secondary">
-                    Images captured: {capturedImages.length}
-                  </Text>
-                </Space>
-              </Card>
-
-              {/* Captured Images */}
-              {capturedImages.length > 0 && (
-                <Card title="Recent Captures" size="small">
-                  <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
-                    {capturedImages.slice(-3).map((image) => (
-                      <div key={image.id} style={{ marginBottom: '8px' }}>
-                        <img
-                          src={image.data}
-                          alt="Captured"
-                          style={{
-                            width: '100%',
-                            height: '60px',
-                            objectFit: 'cover',
-                            borderRadius: '4px'
+                      <div style={{
+                        position: 'absolute',
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
+                        background: 'rgba(0,0,0,0.6)',
+                        color: 'white',
+                        padding: '4px 8px',
+                        fontSize: '11px',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center'
+                      }}>
+                        <span>{new Date(img.timestamp).toLocaleTimeString()}</span>
+                        <DeleteOutlined 
+                          style={{ cursor: 'pointer', color: '#ff4d4f' }}
+                          onClick={() => {
+                            setCapturedImages(prev => prev.filter(i => i.id !== img.id));
+                            message.success('Image deleted');
                           }}
                         />
-                        <Text type="secondary" style={{ fontSize: '12px' }}>
-                          {new Date(image.timestamp).toLocaleTimeString()}
-                        </Text>
                       </div>
-                    ))}
-                  </div>
-                </Card>
-              )}
-
-              {/* Instructions */}
-              <Card title="Instructions" size="small">
-                <Space direction="vertical" size="small">
-                  <Text>• Position your pet clearly in front of the camera</Text>
-                  <Text>• <strong>Describe symptoms and concerns clearly</strong></Text>
-                  <Text>• Images are automatically captured every 20 seconds</Text>
-                  <Text>• <strong>Speech is transcribed for symptoms recording</strong></Text>
-                  <Divider style={{ margin: '8px 0' }} />
-                  <Text strong style={{ color: '#52c41a', fontSize: '13px' }}>
-                    ✓ AI Assessment + Hospital Booking Available
-                  </Text>
-                </Space>
+                    </div>
+                  ))}
+                </div>
               </Card>
-            </Space>
+            )}
+          </Col>
+
+          <Col xs={24} lg={12} xl={11}>
+            {/* AI Chat Assistant */}
+            <Card 
+              title={
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                  <Space>
+                    <span style={{ fontSize: '20px' }}>🤖</span>
+                    <span>AI Veterinary Assistant</span>
+                  </Space>
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={speechEnabled ? <SoundOutlined /> : <StopOutlined />}
+                    onClick={toggleSpeech}
+                    style={{ 
+                      color: speechEnabled ? '#52c41a' : '#999',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}
+                  >
+                    {isSpeaking && <span style={{ fontSize: '10px' }}>🔊</span>}
+                  </Button>
+                </div>
+              }
+              style={{ height: '600px', display: 'flex', flexDirection: 'column' }}
+              bodyStyle={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 0 }}
+            >
+              {/* Chat Messages */}
+              <div style={{
+                flex: 1,
+                overflowY: 'auto',
+                padding: '16px',
+                background: '#f5f5f5'
+              }}>
+                {/* Speech hint */}
+                {!speechEnabled && messages.length > 0 && (
+                  <div style={{
+                    marginBottom: '12px',
+                    padding: '8px 12px',
+                    background: '#e6f7ff',
+                    border: '1px solid #91d5ff',
+                    borderRadius: '8px',
+                    fontSize: '12px',
+                    color: '#0050b3',
+                    textAlign: 'center'
+                  }}>
+                    💡 Click the <SoundOutlined /> button above to enable AI voice responses
+                  </div>
+                )}
+                
+                {messages.map((msg, index) => (
+                  <div
+                    key={index}
+                    style={{
+                      marginBottom: '12px',
+                      display: 'flex',
+                      justifyContent: msg.sender === 'user' ? 'flex-end' : 'flex-start'
+                    }}
+                  >
+                    <div
+                      style={{
+                        maxWidth: '80%',
+                        padding: '10px 14px',
+                        borderRadius: '12px',
+                        background: msg.sender === 'user' ? '#1890ff' : '#fff',
+                        color: msg.sender === 'user' ? '#fff' : '#000',
+                        boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
+                        wordBreak: 'break-word'
+                      }}
+                    >
+                      <div style={{ fontSize: '14px', lineHeight: '1.5' }}>
+                        {msg.content}
+                      </div>
+                      <div style={{
+                        fontSize: '11px',
+                        marginTop: '4px',
+                        opacity: 0.7
+                      }}>
+                        {msg.timestamp?.toLocaleTimeString()}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                
+                {isAILoading && (
+                  <div style={{ display: 'flex', justifyContent: 'flex-start', marginBottom: '12px' }}>
+                    <div style={{
+                      padding: '10px 14px',
+                      borderRadius: '12px',
+                      background: '#fff',
+                      boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
+                    }}>
+                      <div className="typing-dots">
+                        <span style={{
+                          display: 'inline-block',
+                          width: '8px',
+                          height: '8px',
+                          borderRadius: '50%',
+                          background: '#1890ff',
+                          margin: '0 2px',
+                          animation: 'typing 1.4s infinite'
+                        }}></span>
+                        <span style={{
+                          display: 'inline-block',
+                          width: '8px',
+                          height: '8px',
+                          borderRadius: '50%',
+                          background: '#1890ff',
+                          margin: '0 2px',
+                          animation: 'typing 1.4s infinite 0.2s'
+                        }}></span>
+                        <span style={{
+                          display: 'inline-block',
+                          width: '8px',
+                          height: '8px',
+                          borderRadius: '50%',
+                          background: '#1890ff',
+                          margin: '0 2px',
+                          animation: 'typing 1.4s infinite 0.4s'
+                        }}></span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                
+                <div ref={chatEndRef} />
+              </div>
+
+              {/* Control Buttons */}
+              <div style={{
+                padding: '12px',
+                borderTop: '1px solid #f0f0f0',
+                background: '#fff',
+                display: 'flex',
+                gap: '12px',
+                alignItems: 'center'
+              }}>
+                {/* Speech Recognition Toggle */}
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '6px 12px',
+                  background: isListening ? '#f6ffed' : '#f5f5f5',
+                  borderRadius: '8px',
+                  border: `1px solid ${isListening ? '#b7eb8f' : '#d9d9d9'}`,
+                  transition: 'all 0.3s ease'
+                }}>
+                  {isListening ? <AudioOutlined style={{ color: '#52c41a', fontSize: '14px' }} /> : <AudioMutedOutlined style={{ color: '#999', fontSize: '14px' }} />}
+                  <span style={{ fontWeight: 500, color: isListening ? '#52c41a' : '#666', fontSize: '13px', whiteSpace: 'nowrap' }}>
+                    {isListening ? 'Voice' : 'Text'}
+                  </span>
+                  <Tooltip title="Toggle speech recognition">
+                    <Switch
+                      checked={speechRecognitionEnabled}
+                      onChange={(checked) => {
+                        setSpeechRecognitionEnabled(checked);
+                        speechRecognitionEnabledRef.current = checked; // Update ref for closure access
+                        
+                        if (checked) {
+                          // Start speech recognition
+                          if (recognitionRef.current) {
+                            try {
+                              recognitionRef.current.start();
+                              console.log('Speech recognition enabled via switch');
+                              message.success('Voice input enabled - will auto-restart on silence');
+                            } catch (error) {
+                              console.error('Error starting speech recognition:', error);
+                              message.error('Failed to start speech recognition: ' + error.message);
+                              setSpeechRecognitionEnabled(false);
+                              speechRecognitionEnabledRef.current = false;
+                            }
+                          } else {
+                            message.error('Speech recognition not available');
+                            setSpeechRecognitionEnabled(false);
+                            speechRecognitionEnabledRef.current = false;
+                          }
+                        } else {
+                          // Stop speech recognition
+                          if (recognitionRef.current) {
+                            try {
+                              recognitionRef.current.stop();
+                              console.log('Speech recognition disabled via switch');
+                              message.info('Voice input disabled');
+                            } catch (error) {
+                              console.error('Error stopping speech recognition:', error);
+                            }
+                          }
+                        }
+                      }}
+                    />
+                  </Tooltip>
+                </div>
+
+                {/* End Consultation Button */}
+                <Button
+                  icon={<CheckCircleOutlined />}
+                  onClick={endConsultation}
+                  type="primary"
+                  size="large"
+                  style={{ backgroundColor: '#52c41a' }}
+                >
+                  End Consultation
+                </Button>
+              </div>
+
+              {/* Chat Input */}
+              <div style={{
+                padding: '12px',
+                borderTop: '1px solid #f0f0f0',
+                background: '#fff'
+              }}>
+                <Space.Compact style={{ width: '100%' }}>
+                  <input
+                    type="text"
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey && chatInput.trim() && !isAILoading) {
+                        e.preventDefault();
+                        handleSendAIMessage();
+                      }
+                    }}
+                    placeholder="Ask the AI assistant about your pet..."
+                    disabled={isAILoading}
+                    style={{
+                      flex: 1,
+                      padding: '8px 12px',
+                      border: '1px solid #d9d9d9',
+                      borderRadius: '6px 0 0 6px',
+                      fontSize: '14px',
+                      outline: 'none'
+                    }}
+                  />
+                  <Button
+                    type="primary"
+                    icon={<SendOutlined />}
+                    onClick={handleSendAIMessage}
+                    disabled={!chatInput.trim() || isAILoading}
+                    style={{ borderRadius: '0 6px 6px 0' }}
+                  >
+                    Send
+                  </Button>
+                </Space.Compact>
+              </div>
+
+              {/* Session Info */}
+              <div style={{
+                padding: '8px 12px',
+                background: isListening ? '#f6ffed' : '#f5f5f5',
+                borderTop: '1px solid #f0f0f0',
+                fontSize: '12px',
+                color: '#666',
+                transition: 'background 0.3s ease'
+              }}>
+                <Space split={<Divider type="vertical" />}>
+                  <span>📸 Images: {capturedImages.length}</span>
+                  <span style={{
+                    color: isListening ? '#52c41a' : '#666',
+                    fontWeight: isListening ? 'bold' : 'normal'
+                  }}>
+                    {isListening ? '🎤 Listening' : '⌨️ Manual Input'}
+                  </span>
+                  {isVideoActive && <span style={{ color: '#52c41a' }}>📹 Video Active</span>}
+                </Space>
+              </div>
+            </Card>
           </Col>
         </Row>
-
-        {/* Transcription Panel - Always visible when recording or has content */}
-        <div className="transcription-panel" style={{ marginTop: '20px' }}>
-          <Title level={4}>
-            <SoundOutlined /> Symptoms & Concerns Recording
-            {isListening && <span style={{ color: '#52c41a', marginLeft: '8px' }}>● Recording</span>}
-            {!isListening && isRecording && <span style={{ color: '#faad14', marginLeft: '8px' }}>● Paused</span>}
-          </Title>
-          <Divider style={{ margin: '12px 0' }} />
-          <div style={{
-            minHeight: '120px',
-            maxHeight: '200px',
-            overflowY: 'auto',
-            padding: '12px',
-            background: transcription ? 'white' : '#fafafa',
-            borderRadius: '8px',
-            border: '1px solid #d9d9d9',
-            fontSize: '14px',
-            lineHeight: '1.6'
-          }}>
-            {transcription ? (
-              <div>
-                <Text strong style={{ color: '#1890ff', fontSize: '12px' }}>TRANSCRIBED SYMPTOMS:</Text>
-                <br />
-                <Text>{transcription}</Text>
-              </div>
-            ) : (
-              <Text type="secondary" italic>
-                {!isRecording 
-                  ? 'Start recording to begin transcribing symptoms and concerns.'
-                  : isListening 
-                    ? 'Listening... Please describe your pet\'s symptoms and concerns clearly.' 
-                    : 'Speech recognition is initializing...'}
-              </Text>
-            )}
-          </div>
-          
-          {/* Debug info for troubleshooting */}
-          {process.env.NODE_ENV === 'development' && (
-            <div style={{ marginTop: '8px', fontSize: '12px', color: '#666' }}>
-              <Text type="secondary">
-                Debug: Recording={isRecording.toString()}, Listening={isListening.toString()}, 
-                SpeechAPI={('webkitSpeechRecognition' in window || 'SpeechRecognition' in window).toString()}
-              </Text>
-            </div>
-          )}
-        </div>
-
-        {!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) && (
-          <Alert
-            message="Speech Recognition Not Available"
-            description="Your browser doesn't support speech recognition. Transcription features will not work."
-            type="warning"
-            style={{ marginTop: '20px' }}
-          />
-        )}
       </div>
     </div>
   );

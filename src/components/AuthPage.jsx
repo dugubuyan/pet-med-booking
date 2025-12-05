@@ -32,11 +32,11 @@ const AuthPage = () => {
   const handleLogin = async (values) => {
     setLoading(true);
     try {
-      const user = authService.login(values.email, values.password);
+      const user = await authService.login(values.email, values.password);
       message.success(`Welcome back, ${user.fullName}!`);
       navigate('/');
     } catch (error) {
-      message.error(error.message);
+      message.error(error.message || 'Login failed. Please check your connection and try again.');
     } finally {
       setLoading(false);
     }
@@ -45,11 +45,11 @@ const AuthPage = () => {
   const handleRegister = async (values) => {
     setLoading(true);
     try {
-      const user = authService.register(values);
+      const user = await authService.register(values);
       message.success(`Account created successfully! Welcome, ${user.fullName}!`);
       navigate('/');
     } catch (error) {
-      message.error(error.message);
+      message.error(error.message || 'Registration failed. Please check your connection and try again.');
     } finally {
       setLoading(false);
     }
@@ -104,11 +104,7 @@ const AuthPage = () => {
         </Button>
       </Form.Item>
 
-      <div style={{ textAlign: 'center', marginTop: '12px' }}>
-        <Text type="secondary" style={{ fontSize: '12px' }}>
-          Demo account: demo@petcare.com / demo123
-        </Text>
-      </div>
+
     </Form>
   );
 

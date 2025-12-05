@@ -14,55 +14,76 @@ import {
   Tag,
   Timeline,
   message,
-  Modal,
-  Form,
-  DatePicker,
-  TimePicker,
-  Select,
-  Input,
 } from 'antd';
 import {
   DownloadOutlined,
-  PrinterOutlined,
   HomeOutlined,
-  CalendarOutlined,
-  UserOutlined,
   HeartOutlined,
   CameraOutlined,
   SoundOutlined,
   ClockCircleOutlined,
   CheckCircleOutlined,
-  PhoneOutlined,
-  MailOutlined,
 } from '@ant-design/icons';
-import dayjs from 'dayjs';
+import apiService from '../services/apiService';
 
 const { Title, Text, Paragraph } = Typography;
-const { TextArea } = Input;
-const { Option } = Select;
 
 const AppointmentResults = () => {
   const [bookingData, setBookingData] = useState(null);
   const [sessionData, setSessionData] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [appointmentModalVisible, setAppointmentModalVisible] = useState(false);
-  const [appointmentBooked, setAppointmentBooked] = useState(false);
-  const [appointmentForm] = Form.useForm();
   const navigate = useNavigate();
 
   useEffect(() => {
-    // Load data from localStorage
-    const booking = localStorage.getItem('currentBooking');
+    loadAppointmentData();
+  }, []);
+
+  const loadAppointmentData = async () => {
+    // Load session data from localStorage (for images/transcription)
     const session = localStorage.getItem('sessionData');
-    
-    if (booking) {
-      setBookingData(JSON.parse(booking));
-    }
-    
     if (session) {
       setSessionData(JSON.parse(session));
     }
-  }, []);
+
+    // Get bookingId from URL parameter first, then fallback to localStorage
+    const urlParams = new URLSearchParams(window.location.search);
+    let bookingId = urlParams.get('bookingId');
+    
+    if (!bookingId) {
+      // Try to get from localStorage as fallback
+      bookingId = localStorage.getItem('currentBookingId');
+      console.log('🔗 BookingId from localStorage:', bookingId);
+    } else {
+      console.log('🔗 BookingId from URL:', bookingId);
+    }
+    
+    if (!bookingId) {
+      console.error('❌ No bookingId in URL or localStorage');
+      message.error('No appointment ID provided');
+      return;
+    }
+    
+    // Fetch appointment data from backend
+    console.log('🔍 Fetching appointment from backend with ID:', bookingId);
+    try {
+      setLoading(true);
+      const response = await apiService.getAppointment(bookingId);
+      console.log('✅ Backend response:', response);
+      
+      if (response.success && response.appointment) {
+        console.log('📅 Appointment data received:', response.appointment);
+        setBookingData(response.appointment);
+      } else {
+        console.error('⚠️ No appointment found');
+        message.error('Appointment not found');
+      }
+    } catch (error) {
+      console.error('❌ Failed to fetch appointment:', error);
+      message.error('Failed to load appointment details');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const downloadReport = () => {
     setLoading(true);
@@ -105,8 +126,23 @@ const AppointmentResults = () => {
     message.success(`Downloaded ${sessionData.capturedImages.length} images!`);
   };
 
-  const printReport = () => {
-    window.print();
+  const formatDuration = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}m ${secs}s`;
+  };
+
+  const formatAppointmentDate = (dateStr) => {
+    if (!dateStr) return 'Date to be confirmed';
+    // If it's already in YYYY-MM-DD format, convert to readable format
+    const date = new Date(dateStr);
+    if (isNaN(date.getTime())) return dateStr; // Return as-is if invalid
+    return date.toLocaleDateString('en-US', { 
+      weekday: 'long', 
+      year: 'numeric', 
+      month: 'long', 
+      day: 'numeric' 
+    });
   };
 
   const startNewBooking = () => {
@@ -114,88 +150,6 @@ const AppointmentResults = () => {
     localStorage.removeItem('currentBooking');
     localStorage.removeItem('sessionData');
     navigate('/');
-  };
-
-  const handleBookAppointment = () => {
-    // Pre-fill form with existing data
-    if (bookingData && !bookingData.isGuest) {
-      // For logged-in users, pre-fill all known information
-      appointmentForm.setFieldsValue({
-        ownerName: bookingData.ownerName,
-        email: bookingData.email,
-        phone: bookingData.phone,
-        petName: bookingData.petName,
-      });
-    } else if (bookingData && bookingData.isGuest) {
-      // For guests, only pre-fill if they provided info in booking form
-      appointmentForm.setFieldsValue({
-        ownerName: bookingData.ownerName !== 'Guest User' ? bookingData.ownerName : '',
-        email: bookingData.email !== 'guest@consultation.com' ? bookingData.email : '',
-        phone: bookingData.phone !== 'N/A' ? bookingData.phone : '',
-        petName: bookingData.petName !== 'Pet' ? bookingData.petName : '',
-      });
-    }
-    setAppointmentModalVisible(true);
-  };
-
-  const handleAppointmentSubmit = (values) => {
-    const appointmentData = {
-      ...values,
-      date: values.date.format('YYYY-MM-DD'),
-      time: values.time.format('HH:mm'),
-      appointmentId: `APT-${Date.now()}`,
-      consultationId: bookingData?.bookingId,
-      createdAt: new Date().toISOString(),
-      status: 'Pending Confirmation'
-    };
-
-    // Store appointment data
-    const existingAppointments = JSON.parse(localStorage.getItem('appointments') || '[]');
-    existingAppointments.push(appointmentData);
-    localStorage.setItem('appointments', JSON.stringify(existingAppointments));
-
-    // Check if user is logged in
-    const currentUser = JSON.parse(localStorage.getItem('pet_app_current_user') || 'null');
-    const isLoggedIn = currentUser !== null && !bookingData?.isGuest;
-
-    if (isLoggedIn) {
-      // Simulate email sending for logged-in users
-      message.success({
-        content: (
-          <div>
-            <div><strong>Appointment request submitted successfully!</strong></div>
-            <div style={{ marginTop: '8px' }}>📧 Confirmation email sent to: <strong>{values.email}</strong></div>
-            <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
-              Check your inbox for appointment details and next steps.
-            </div>
-          </div>
-        ),
-        duration: 6,
-      });
-    } else {
-      // Guest users don't receive email
-      message.success({
-        content: (
-          <div>
-            <div><strong>Appointment request submitted successfully!</strong></div>
-            <div style={{ marginTop: '8px', fontSize: '12px', color: '#666' }}>
-              💡 Tip: Create an account to receive email confirmations for future appointments.
-            </div>
-          </div>
-        ),
-        duration: 5,
-      });
-    }
-
-    setAppointmentModalVisible(false);
-    appointmentForm.resetFields();
-    setAppointmentBooked(true); // Set appointment booked state
-  };
-
-  const formatDuration = (seconds) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins} minutes ${secs} seconds`;
   };
 
   if (!bookingData) {
@@ -234,142 +188,173 @@ const AppointmentResults = () => {
       </div>
 
       <div className="results-content">
-        {/* Action Buttons */}
-        <div style={{ marginBottom: '24px', textAlign: 'center' }}>
-          <Space size="large">
-            <Button
-              type="primary"
-              icon={<DownloadOutlined />}
-              onClick={downloadReport}
-              loading={loading}
-              size="large"
-            >
-              Download Report
-            </Button>
-            <Button
-              icon={<PrinterOutlined />}
-              onClick={printReport}
-              size="large"
-            >
-              Print Report
-            </Button>
-            <Button
-              icon={<HomeOutlined />}
-              onClick={startNewBooking}
-              size="large"
-            >
-              New Booking
-            </Button>
-          </Space>
-        </div>
+        {/* Appointment Details - TOP PRIORITY */}
+        <Card
+          style={{ marginBottom: '24px', background: '#f6ffed', borderColor: '#b7eb8f' }}
+        >
+          <div style={{ padding: '16px' }}>
+            <div style={{ textAlign: 'center', marginBottom: '24px' }}>
+              <CheckCircleOutlined style={{ fontSize: '48px', color: '#52c41a', marginBottom: '12px' }} />
+              <Title level={3} style={{ color: '#52c41a', marginBottom: '8px' }}>
+                ✅ Appointment Scheduled
+              </Title>
+              <Text style={{ fontSize: '14px', color: '#666' }}>
+                Your consultation has been recorded and an appointment has been created
+              </Text>
+            </div>
+
+            {(() => {
+              const currentUser = JSON.parse(localStorage.getItem('pet_app_current_user') || 'null');
+              const isLoggedIn = currentUser !== null && !bookingData?.isGuest;
+              return (
+                <>
+                  {isLoggedIn ? (
+                    <Alert
+                      message="📧 Confirmation Email Sent"
+                      description={
+                        <div>
+                          <p style={{ marginBottom: '4px' }}>
+                            A confirmation email has been sent to: <strong>{bookingData.email || currentUser?.email}</strong>
+                          </p>
+                          <p style={{ marginBottom: '0', fontSize: '13px' }}>
+                            Please check your inbox for complete appointment details.
+                          </p>
+                        </div>
+                      }
+                      type="success"
+                      showIcon
+                      style={{ marginBottom: '20px' }}
+                    />
+                  ) : (
+                    <Alert
+                      message="📞 We'll Contact You Soon"
+                      description="Your appointment request has been submitted. Our team will contact you via phone to confirm the details."
+                      type="info"
+                      showIcon
+                      style={{ marginBottom: '20px' }}
+                    />
+                  )}
+                </>
+              );
+            })()}
+
+            <Divider style={{ margin: '20px 0' }}>
+              <Text strong style={{ color: '#52c41a' }}>Appointment Details</Text>
+            </Divider>
+
+            {/* Date and Time Section */}
+            <div style={{ background: '#fff', padding: '16px', borderRadius: '8px', border: '1px solid #d9f7be', marginBottom: '16px' }}>
+              <Row gutter={[16, 16]}>
+                <Col xs={24} md={12}>
+                  <div style={{ marginBottom: '12px' }}>
+                    <Text type="secondary" style={{ fontSize: '12px', display: 'block', marginBottom: '6px' }}>
+                      📅 Date
+                    </Text>
+                    <Text strong style={{ fontSize: '16px', display: 'block', color: '#52c41a' }}>
+                      {formatAppointmentDate(bookingData.appointmentDate)}
+                    </Text>
+                  </div>
+                </Col>
+                <Col xs={24} md={12}>
+                  <div style={{ marginBottom: '12px' }}>
+                    <Text type="secondary" style={{ fontSize: '12px', display: 'block', marginBottom: '6px' }}>
+                      🕐 Time
+                    </Text>
+                    <Text strong style={{ fontSize: '18px', display: 'block', color: '#52c41a' }}>
+                      {bookingData.appointmentTime || 'Time to be confirmed'}
+                    </Text>
+                    <Text type="secondary" style={{ fontSize: '12px' }}>
+                      Duration: Approximately 30-45 minutes
+                    </Text>
+                  </div>
+                </Col>
+              </Row>
+            </div>
+
+            {/* Location Section */}
+            <div style={{ background: '#fff', padding: '16px', borderRadius: '8px', border: '1px solid #d9f7be', marginBottom: '16px' }}>
+              <Text type="secondary" style={{ fontSize: '12px', display: 'block', marginBottom: '8px' }}>
+                📍 Location
+              </Text>
+              <Text strong style={{ fontSize: '16px', display: 'block', marginBottom: '8px' }}>
+                {bookingData.location || 'Location to be confirmed'}
+              </Text>
+              {bookingData.location && (
+                <>
+                  <Divider style={{ margin: '12px 0' }} />
+                  <Row gutter={16}>
+                    <Col span={12}>
+                      <Text type="secondary" style={{ fontSize: '12px', display: 'block' }}>
+                        📞 Phone
+                      </Text>
+                      <Text style={{ fontSize: '14px' }}>
+                        (555) 123-4567
+                      </Text>
+                    </Col>
+                    <Col span={12}>
+                      <Text type="secondary" style={{ fontSize: '12px', display: 'block' }}>
+                        🅿️ Parking
+                      </Text>
+                      <Text style={{ fontSize: '14px' }}>
+                        Free parking available
+                      </Text>
+                    </Col>
+                  </Row>
+                </>
+              )}
+            </div>
+
+            {/* Appointment Type and ID */}
+            <Row gutter={[16, 16]} style={{ marginBottom: '16px' }}>
+              <Col xs={24} md={12}>
+                <div style={{ padding: '12px', background: '#fff', borderRadius: '8px', border: '1px solid #d9f7be' }}>
+                  <Text type="secondary" style={{ fontSize: '12px', display: 'block', marginBottom: '4px' }}>
+                    🏥 Consultation Type
+                  </Text>
+                  <Text strong style={{ fontSize: '16px' }}>
+                    {bookingData.appointmentType}
+                  </Text>
+                </div>
+              </Col>
+              <Col xs={24} md={12}>
+                <div style={{ padding: '12px', background: '#fff', borderRadius: '8px', border: '1px solid #d9f7be' }}>
+                  <Text type="secondary" style={{ fontSize: '12px', display: 'block', marginBottom: '4px' }}>
+                    📋 Booking Reference
+                  </Text>
+                  <Text strong style={{ fontSize: '16px' }}>
+                    {bookingData.bookingId}
+                  </Text>
+                </div>
+              </Col>
+            </Row>
+
+            <Divider style={{ margin: '20px 0' }} />
+
+            <div style={{ background: '#fffbe6', padding: '12px', borderRadius: '8px', border: '1px solid #ffe58f', marginBottom: '16px' }}>
+              <Text style={{ fontSize: '14px' }}>
+                <strong>⏰ What happens next?</strong>
+                <br />
+                A veterinary professional will review your consultation data and contact you within 24-48 hours to confirm your appointment and discuss your pet's condition.
+              </Text>
+            </div>
+
+            <Alert
+              message="⚠️ Emergency Notice"
+              description="If your pet shows signs of severe distress, difficulty breathing, or severe bleeding, contact your local veterinary emergency clinic immediately."
+              type="warning"
+              showIcon
+            />
+          </div>
+        </Card>
+
+        {/* Consultation Details Header */}
+        <Divider orientation="left" style={{ marginTop: '32px', marginBottom: '24px' }}>
+          <Text strong style={{ fontSize: '16px', color: '#1890ff' }}>
+            📋 Consultation Details
+          </Text>
+        </Divider>
 
         <Row gutter={24}>
-          <Col xs={24} lg={12}>
-            {/* Booking Information */}
-            <Card
-              title={
-                <Space>
-                  <CalendarOutlined />
-                  Appointment Details
-                </Space>
-              }
-              style={{ marginBottom: '24px' }}
-            >
-              <Descriptions column={1} size="small">
-                <Descriptions.Item label="Booking ID">
-                  <Tag color="blue">{bookingData.bookingId}</Tag>
-                </Descriptions.Item>
-                <Descriptions.Item label="Date & Time">
-                  {bookingData.appointmentDate} at {bookingData.appointmentTime}
-                </Descriptions.Item>
-                <Descriptions.Item label="Consultation Type">
-                  <Tag color="green">{bookingData.appointmentType}</Tag>
-                </Descriptions.Item>
-                <Descriptions.Item label="Status">
-                  <Tag color="success" icon={<CheckCircleOutlined />}>
-                    Completed
-                  </Tag>
-                </Descriptions.Item>
-              </Descriptions>
-            </Card>
-
-            {/* Pet Owner Information */}
-            <Card
-              title={
-                <Space>
-                  <UserOutlined />
-                  Pet Owner Information
-                </Space>
-              }
-              style={{ marginBottom: '24px' }}
-            >
-              <Descriptions column={1} size="small">
-                <Descriptions.Item label="Name">
-                  {bookingData.isGuest ? (
-                    <Text type="secondary">Guest User</Text>
-                  ) : (
-                    bookingData.ownerName
-                  )}
-                </Descriptions.Item>
-                <Descriptions.Item label="Email">
-                  {bookingData.isGuest ? (
-                    <Text type="secondary">Not provided</Text>
-                  ) : (
-                    bookingData.email
-                  )}
-                </Descriptions.Item>
-                <Descriptions.Item label="Phone">
-                  {bookingData.isGuest ? (
-                    <Text type="secondary">Not provided</Text>
-                  ) : (
-                    bookingData.phone
-                  )}
-                </Descriptions.Item>
-              </Descriptions>
-            </Card>
-
-            {/* Pet Information */}
-            <Card
-              title={
-                <Space>
-                  <HeartOutlined />
-                  Pet Information
-                </Space>
-              }
-              style={{ marginBottom: '24px' }}
-            >
-              <Descriptions column={1} size="small">
-                <Descriptions.Item label="Pet Name">
-                  {bookingData.isGuest ? (
-                    <Text type="secondary">Not specified</Text>
-                  ) : (
-                    bookingData.petName
-                  )}
-                </Descriptions.Item>
-                <Descriptions.Item label="Type">
-                  {bookingData.isGuest ? (
-                    <Text type="secondary">Not specified</Text>
-                  ) : (
-                    bookingData.petType
-                  )}
-                </Descriptions.Item>
-                <Descriptions.Item label="Age">
-                  {bookingData.isGuest ? (
-                    <Text type="secondary">Not specified</Text>
-                  ) : (
-                    bookingData.petAge
-                  )}
-                </Descriptions.Item>
-                {!bookingData.isGuest && bookingData.petBreed && (
-                  <Descriptions.Item label="Breed">{bookingData.petBreed}</Descriptions.Item>
-                )}
-                {!bookingData.isGuest && bookingData.petWeight && (
-                  <Descriptions.Item label="Weight">{bookingData.petWeight}</Descriptions.Item>
-                )}
-              </Descriptions>
-            </Card>
-          </Col>
-
           <Col xs={24} lg={12}>
             {/* Session Summary */}
             {sessionData && (
@@ -389,7 +374,7 @@ const AppointmentResults = () => {
                   <Descriptions.Item label="Images Captured">
                     {sessionData.capturedImages?.length || 0} images
                   </Descriptions.Item>
-                  <Descriptions.Item label="Transcription">
+                  <Descriptions.Item label="Voice Recording">
                     {sessionData.transcription ? 'Available' : 'Not available'}
                   </Descriptions.Item>
                   <Descriptions.Item label="Completed At">
@@ -399,6 +384,36 @@ const AppointmentResults = () => {
               </Card>
             )}
 
+            {/* Pet Information */}
+            {!bookingData.isGuest && (
+              <Card
+                title={
+                  <Space>
+                    <HeartOutlined />
+                    Pet Information
+                  </Space>
+                }
+                style={{ marginBottom: '24px' }}
+              >
+                <Descriptions column={1} size="small">
+                  <Descriptions.Item label="Pet Name">
+                    {bookingData.petName}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="Type">
+                    {bookingData.petType}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="Age">
+                    {bookingData.petAge}
+                  </Descriptions.Item>
+                  {bookingData.petBreed && (
+                    <Descriptions.Item label="Breed">{bookingData.petBreed}</Descriptions.Item>
+                  )}
+                </Descriptions>
+              </Card>
+            )}
+          </Col>
+
+          <Col xs={24} lg={12}>
             {/* Timeline */}
             <Card
               title="Consultation Timeline"
@@ -410,19 +425,7 @@ const AppointmentResults = () => {
                     color: 'blue',
                     children: (
                       <div>
-                        <Text strong>Booking Created</Text>
-                        <br />
-                        <Text type="secondary">
-                          {new Date(bookingData.createdAt).toLocaleString()}
-                        </Text>
-                      </div>
-                    ),
-                  },
-                  {
-                    color: 'green',
-                    children: (
-                      <div>
-                        <Text strong>Video Session Started</Text>
+                        <Text strong>Session Started</Text>
                         <br />
                         <Text type="secondary">Camera and audio activated</Text>
                       </div>
@@ -435,7 +438,7 @@ const AppointmentResults = () => {
                         <Text strong>Images Captured</Text>
                         <br />
                         <Text type="secondary">
-                          {sessionData.capturedImages.length} images automatically captured
+                          {sessionData.capturedImages.length} images recorded
                         </Text>
                       </div>
                     ),
@@ -444,9 +447,9 @@ const AppointmentResults = () => {
                     color: 'purple',
                     children: (
                       <div>
-                        <Text strong>Voice Transcription</Text>
+                        <Text strong>Voice Recorded</Text>
                         <br />
-                        <Text type="secondary">Speech recorded and transcribed</Text>
+                        <Text type="secondary">Symptoms transcribed</Text>
                       </div>
                     ),
                   }] : []),
@@ -454,7 +457,7 @@ const AppointmentResults = () => {
                     color: 'green',
                     children: (
                       <div>
-                        <Text strong>Consultation Completed</Text>
+                        <Text strong>Session Completed</Text>
                         <br />
                         <Text type="secondary">
                           {sessionData?.endTime ? new Date(sessionData.endTime).toLocaleString() : 'Just now'}
@@ -474,19 +477,18 @@ const AppointmentResults = () => {
             title={
               <Space>
                 <SoundOutlined />
-                Symptoms & Concerns (Voice Recorded)
+                Recorded Symptoms
               </Space>
             }
             style={{ marginBottom: '24px' }}
           >
             <div style={{
-              background: '#f5f5f5',
+              background: '#fafafa',
               padding: '16px',
               borderRadius: '8px',
-              maxHeight: '300px',
-              overflowY: 'auto'
+              border: '1px solid #f0f0f0'
             }}>
-              <Paragraph>
+              <Paragraph style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }}>
                 {sessionData.transcription}
               </Paragraph>
             </div>
@@ -497,9 +499,11 @@ const AppointmentResults = () => {
         {sessionData?.capturedImages?.length > 0 && (
           <Card
             title={
-              <Space>
-                <CameraOutlined />
-                Captured Images ({sessionData.capturedImages.length})
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Space>
+                  <CameraOutlined />
+                  Captured Images ({sessionData.capturedImages.length})
+                </Space>
                 <Button
                   type="link"
                   icon={<DownloadOutlined />}
@@ -507,21 +511,21 @@ const AppointmentResults = () => {
                 >
                   Download All
                 </Button>
-              </Space>
+              </div>
             }
             style={{ marginBottom: '24px' }}
           >
-            <div className="captured-images">
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '16px' }}>
               {sessionData.capturedImages.map((image, index) => (
-                <div key={image.id} className="captured-image">
+                <div key={image.id} style={{ border: '1px solid #f0f0f0', borderRadius: '8px', overflow: 'hidden' }}>
                   <Image
                     src={image.data}
-                    alt={`Captured at ${new Date(image.timestamp).toLocaleTimeString()}`}
+                    alt={`Captured ${index + 1}`}
                     style={{ width: '100%', height: '150px', objectFit: 'cover' }}
                   />
-                  <div style={{ padding: '8px', textAlign: 'center' }}>
+                  <div style={{ padding: '8px', textAlign: 'center', background: '#fafafa' }}>
                     <Text type="secondary" style={{ fontSize: '12px' }}>
-                      {new Date(image.timestamp).toLocaleString()}
+                      {new Date(image.timestamp).toLocaleTimeString()}
                     </Text>
                   </div>
                 </div>
@@ -530,101 +534,19 @@ const AppointmentResults = () => {
           </Card>
         )}
 
-        {/* AI Analysis & Recommendations */}
-        <Card
-          title="🤖 AI Analysis & Hospital Booking"
-          style={{ marginBottom: '24px' }}
-        >
-          <Alert
-            message="Comprehensive Pet Care Service"
-            description={
-              <div>
-                <p><strong>✅ AI-Assisted Preliminary Assessment Complete</strong></p>
-                <ul>
-                  <li>✓ Video and images have been analyzed by our AI system</li>
-                  <li>✓ Symptoms and concerns have been recorded and transcribed</li>
-                  <li>✓ Preliminary assessment suggests {sessionData?.transcription ? 'further evaluation recommended' : 'monitoring advised'}</li>
-                </ul>
-                <Divider style={{ margin: '16px 0' }} />
-                <p><strong>📋 Professional Review Process:</strong></p>
-                <ul>
-                  <li>A veterinary professional will review your consultation within 24-48 hours</li>
-                  <li>You will receive a detailed medical report via email (for registered users)</li>
-                  <li>If urgent care is needed, you will be contacted immediately</li>
-                </ul>
-                <Divider style={{ margin: '16px 0' }} />
-                <p><strong>🏥 Book Real Veterinary Hospital Appointment:</strong></p>
-                <p>Schedule an in-person or video appointment with a licensed veterinarian at a real veterinary hospital for comprehensive examination and treatment.</p>
-                {appointmentBooked && (() => {
-                  const currentUser = JSON.parse(localStorage.getItem('pet_app_current_user') || 'null');
-                  const isLoggedIn = currentUser !== null && !bookingData?.isGuest;
-                  return (
-                    <Alert
-                      message={isLoggedIn ? "📧 Email Sent" : "✅ Appointment Booked"}
-                      description={
-                        isLoggedIn 
-                          ? `We have sent you a confirmation email to ${bookingData.email || currentUser?.email || 'your registered email'}. Please check your inbox for appointment details and next steps.`
-                          : "Your appointment request has been submitted successfully. You will be contacted shortly."
-                      }
-                      type="success"
-                      showIcon
-                      style={{ marginTop: '12px', marginBottom: '12px' }}
-                    />
-                  );
-                })()}
-                {!appointmentBooked && (() => {
-                  const currentUser = JSON.parse(localStorage.getItem('pet_app_current_user') || 'null');
-                  const isLoggedIn = currentUser !== null && !bookingData?.isGuest;
-                  if (!isLoggedIn) {
-                    return (
-                      <Alert
-                        message="💡 Create Account for Email Notifications"
-                        description="Register for an account to receive email confirmations for your appointments."
-                        type="info"
-                        showIcon
-                        style={{ marginTop: '12px', marginBottom: '12px' }}
-                      />
-                    );
-                  }
-                  return null;
-                })()}
-                <Button
-                  type="primary"
-                  size="large"
-                  icon={<CalendarOutlined />}
-                  onClick={handleBookAppointment}
-                  style={{ marginTop: '8px' }}
-                  disabled={appointmentBooked}
-                >
-                  {appointmentBooked ? 'Appointment Booked' : 'Book Veterinarian Appointment'}
-                </Button>
-                <Divider style={{ margin: '16px 0' }} />
-                <Alert
-                  message="Emergency Notice"
-                  description="If your pet's condition worsens or shows signs of distress, please contact your local veterinary emergency clinic immediately."
-                  type="warning"
-                  showIcon
-                  style={{ marginTop: '16px' }}
-                />
-              </div>
-            }
-            type="info"
-            showIcon
-          />
-        </Card>
-
-        {/* Footer Actions */}
-        <div style={{ textAlign: 'center', marginTop: '32px' }}>
+        {/* Action Buttons */}
+        <div style={{ textAlign: 'center', marginTop: '24px', paddingTop: '24px', borderTop: '1px solid #f0f0f0' }}>
           <Space size="large" wrap>
             <Button
-              type="primary"
               size="large"
-              icon={<CalendarOutlined />}
-              onClick={handleBookAppointment}
+              icon={<DownloadOutlined />}
+              onClick={downloadReport}
+              loading={loading}
             >
-              Book Veterinarian Appointment
+              Download Report
             </Button>
             <Button
+              type="primary"
               size="large"
               icon={<HomeOutlined />}
               onClick={startNewBooking}
@@ -635,163 +557,7 @@ const AppointmentResults = () => {
         </div>
       </div>
 
-      {/* Appointment Booking Modal */}
-      <Modal
-        title="Book Veterinarian Appointment"
-        open={appointmentModalVisible}
-        onCancel={() => {
-          setAppointmentModalVisible(false);
-          appointmentForm.resetFields();
-        }}
-        footer={null}
-        width={600}
-      >
-        <Alert
-          message="Schedule Your Appointment"
-          description={
-            <div>
-              <p>Book a follow-up appointment with a licensed veterinarian for a comprehensive examination of your pet.</p>
-              {(() => {
-                const currentUser = JSON.parse(localStorage.getItem('pet_app_current_user') || 'null');
-                const isLoggedIn = currentUser !== null && !bookingData?.isGuest;
-                return isLoggedIn ? (
-                  <div>
-                    <p style={{ marginTop: '8px', marginBottom: '4px' }}>
-                      📧 <strong>Email confirmation will be sent to:</strong>
-                    </p>
-                    <p style={{ margin: 0, paddingLeft: '24px', color: '#1890ff', fontWeight: '500' }}>
-                      {bookingData.email || currentUser?.email}
-                    </p>
-                  </div>
-                ) : (
-                  <p style={{ marginTop: '8px', marginBottom: 0, color: '#faad14' }}>
-                    💡 <strong>Note:</strong> Email confirmations are only sent to registered users. 
-                    <a href="/auth" style={{ marginLeft: '4px' }}>Create an account</a> to receive email notifications.
-                  </p>
-                );
-              })()}
-            </div>
-          }
-          type="info"
-          showIcon
-          style={{ marginBottom: '24px' }}
-        />
-        
-        <Form
-          form={appointmentForm}
-          layout="vertical"
-          onFinish={handleAppointmentSubmit}
-        >
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item
-                name="ownerName"
-                label="Your Name"
-                rules={[{ required: true, message: 'Please enter your name' }]}
-              >
-                <Input prefix={<UserOutlined />} placeholder="Full name" />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item
-                name="phone"
-                label="Phone Number"
-                rules={[
-                  { required: true, message: 'Please enter your phone' },
-                  { pattern: /^\+?[\d\s\-\(\)]+$/, message: 'Invalid phone number' }
-                ]}
-              >
-                <Input prefix={<PhoneOutlined />} placeholder="Phone number" />
-              </Form.Item>
-            </Col>
-          </Row>
 
-          <Form.Item
-            name="email"
-            label="Email Address"
-            rules={[
-              { required: true, message: 'Please enter your email' },
-              { type: 'email', message: 'Invalid email address' }
-            ]}
-          >
-            <Input prefix={<MailOutlined />} placeholder="Email address" />
-          </Form.Item>
-
-          <Form.Item
-            name="petName"
-            label="Pet Name"
-            rules={[{ required: true, message: 'Please enter pet name' }]}
-          >
-            <Input prefix={<HeartOutlined />} placeholder="Pet name" />
-          </Form.Item>
-
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item
-                name="date"
-                label="Preferred Date"
-                rules={[{ required: true, message: 'Please select a date' }]}
-              >
-                <DatePicker
-                  style={{ width: '100%' }}
-                  disabledDate={(current) => current && current < dayjs().startOf('day')}
-                  format="YYYY-MM-DD"
-                />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item
-                name="time"
-                label="Preferred Time"
-                rules={[{ required: true, message: 'Please select a time' }]}
-              >
-                <TimePicker
-                  style={{ width: '100%' }}
-                  format="HH:mm"
-                  minuteStep={15}
-                />
-              </Form.Item>
-            </Col>
-          </Row>
-
-          <Form.Item
-            name="appointmentType"
-            label="Appointment Type"
-            rules={[{ required: true, message: 'Please select appointment type' }]}
-          >
-            <Select placeholder="Select appointment type">
-              <Option value="In-Person Consultation">In-Person Consultation</Option>
-              <Option value="Video Consultation">Video Consultation</Option>
-              <Option value="Follow-up Visit">Follow-up Visit</Option>
-              <Option value="Emergency">Emergency</Option>
-            </Select>
-          </Form.Item>
-
-          <Form.Item
-            name="reason"
-            label="Reason for Visit"
-            rules={[{ required: true, message: 'Please describe the reason' }]}
-          >
-            <TextArea
-              rows={4}
-              placeholder="Describe your pet's symptoms or concerns..."
-              maxLength={500}
-              showCount
-            />
-          </Form.Item>
-
-          <Form.Item>
-            <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
-              <Button onClick={() => setAppointmentModalVisible(false)}>
-                Cancel
-              </Button>
-              <Button type="primary" htmlType="submit">
-                Submit Appointment Request
-              </Button>
-            </Space>
-          </Form.Item>
-        </Form>
-      </Modal>
     </div>
   );
 };
