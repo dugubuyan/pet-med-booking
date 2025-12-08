@@ -57,8 +57,18 @@ class AppointmentService {
    * @returns {Promise<Object>} Created appointment with booking ID
    */
   async createAppointment(appointmentData, conversationId = null, isGuest = true) {
+    console.log('\n========== APPOINTMENT SERVICE: CREATE ==========');
+    console.log('📥 Received appointment data:');
+    console.log(JSON.stringify(appointmentData, null, 2));
+    console.log('Conversation ID:', conversationId);
+    console.log('Is Guest:', isGuest);
+    
     // Fill in demo data for missing fields
     const completeData = this.fillDemoData(appointmentData);
+    
+    console.log('\n📝 After filling demo data:');
+    console.log(JSON.stringify(completeData, null, 2));
+    console.log('================================================\n');
     
     const {
       ownerName,
@@ -107,7 +117,7 @@ class AppointmentService {
         isGuest ? 1 : 0
       ]);
 
-      return {
+      const appointmentResult = {
         id: result.lastID,
         bookingId,
         ownerName,
@@ -122,9 +132,15 @@ class AppointmentService {
         appointmentDate,
         appointmentTime,
         location,
+        appointmentType: 'General Consultation',  // Default type
         isGuest,
         createdAt: new Date().toISOString()
       };
+      
+      console.log('\n📤 Returning created appointment:');
+      console.log(JSON.stringify(appointmentResult, null, 2));
+      
+      return appointmentResult;
     } catch (error) {
       console.error('Error creating appointment:', error);
       throw new Error('Failed to create appointment');
@@ -138,15 +154,21 @@ class AppointmentService {
    */
   async getAppointment(bookingId) {
     try {
+      console.log('\n🔍 Getting appointment from DB, bookingId:', bookingId);
+      
       const appointment = await db.get(`
         SELECT * FROM appointments WHERE booking_id = ?
       `, [bookingId]);
 
       if (!appointment) {
+        console.log('❌ Appointment not found in database');
         return null;
       }
 
-      return {
+      console.log('\n📥 Raw appointment from DB:');
+      console.log(JSON.stringify(appointment, null, 2));
+
+      const result = {
         id: appointment.id,
         bookingId: appointment.booking_id,
         conversationId: appointment.conversation_id,
@@ -162,9 +184,16 @@ class AppointmentService {
         appointmentDate: appointment.appointment_date,
         appointmentTime: appointment.appointment_time,
         location: appointment.location,
+        appointmentType: 'General Consultation',  // Default type
         isGuest: appointment.is_guest === 1,
         createdAt: appointment.created_at
       };
+      
+      console.log('\n📤 Returning appointment to API:');
+      console.log(JSON.stringify(result, null, 2));
+      console.log('Location value:', result.location);
+      
+      return result;
     } catch (error) {
       console.error('Error getting appointment:', error);
       throw new Error('Failed to retrieve appointment');

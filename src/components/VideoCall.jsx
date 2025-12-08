@@ -15,6 +15,7 @@ import {
   Tooltip,
   Switch,
   Image,
+  Select,
 } from 'antd';
 import {
   VideoCameraOutlined,
@@ -31,6 +32,7 @@ import apiService from '../services/apiService';
 import { authService } from '../services/authService';
 
 const { Title, Text } = Typography;
+const { Option } = Select;
 
 const VideoCall = () => {
   const { t, i18n } = useTranslation();
@@ -50,6 +52,8 @@ const VideoCall = () => {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [speechEnabled, setSpeechEnabled] = useState(false); // Start disabled to avoid browser blocking
   const [speechInitialized, setSpeechInitialized] = useState(false);
+  const [selectedPetId, setSelectedPetId] = useState(null); // Track selected pet
+  const [currentUser, setCurrentUser] = useState(null); // Store user in state
   
   const videoRef = useRef(null);
   const streamRef = useRef(null);
@@ -58,11 +62,42 @@ const VideoCall = () => {
   const sessionTimerRef = useRef(null);
   const speechRecognitionEnabledRef = useRef(false);
   const sessionIdRef = useRef(null);
+  const selectedPetIdRef = useRef(null); // Ref to track selected pet ID for closures
   const chatEndRef = useRef(null);
   const synthRef = useRef(null);
   const navigate = useNavigate();
 
   useEffect(() => {
+    // Get user
+    const user = authService.getCurrentUser();
+    setCurrentUser(user);
+    
+    // Get selected pet from localStorage (set by HomePage)
+    const bookingData = localStorage.getItem('currentBooking');
+    let selectedPet = null;
+    
+    if (bookingData) {
+      const booking = JSON.parse(bookingData);
+      
+      // Find the pet by name from the booking
+      if (user && user.pets) {
+        selectedPet = user.pets.find(p => p.name === booking.petName);
+        if (selectedPet) {
+          console.log('Selected pet for consultation:', selectedPet.name);
+        }
+      }
+    }
+    
+    // Set the selected pet ID
+    if (selectedPet) {
+      setSelectedPetId(selectedPet.id);
+      selectedPetIdRef.current = selectedPet.id;
+    } else if (user && user.pets && user.pets.length > 0) {
+      // Fallback to first pet if no booking data
+      setSelectedPetId(user.pets[0].id);
+      selectedPetIdRef.current = user.pets[0].id;
+    }
+    
     // Create session when entering video call page
     createSession();
     
@@ -162,6 +197,10 @@ const VideoCall = () => {
   }, [sessionId]);
 
   useEffect(() => {
+    selectedPetIdRef.current = selectedPetId;
+  }, [selectedPetId]);
+
+  useEffect(() => {
     // Auto-scroll chat to bottom
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
@@ -184,11 +223,19 @@ const VideoCall = () => {
   const initializeAISession = () => {
     // Show initial greeting immediately (no API call needed)
     const user = authService.getCurrentUser();
+    const currentPetId = selectedPetIdRef.current;
+    
     let greeting;
     
-    if (user && user.pets && user.pets.length > 0) {
-      const petName = user.pets[0].name;
-      greeting = `Hello ${user.fullName}! I'm here to help with ${petName}'s health. What brings you in today?`;
+    if (user && user.pets && user.pets.length > 0 && currentPetId) {
+      const selectedPet = user.pets.find(p => p.id === currentPetId);
+      
+      if (selectedPet) {
+        const petName = selectedPet.name;
+        greeting = `Hello ${user.fullName}! I'm here to help with ${petName}'s health. What brings you in today?`;
+      } else {
+        greeting = `Hello ${user.fullName}! I'm here to help with your pet's health. What brings you in today?`;
+      }
     } else if (user) {
       greeting = `Hello ${user.fullName}! I'm here to help with your pet's health. What brings you in today?`;
     } else {
@@ -200,9 +247,6 @@ const VideoCall = () => {
       sender: 'assistant',
       timestamp: new Date()
     }]);
-    
-    // Don't auto-speak on load - wait for user interaction
-    // The greeting will be spoken when user sends first message or clicks speech button
   };
 
   const speakText = (text) => {
@@ -279,7 +323,6 @@ const VideoCall = () => {
       
       // Use ref to get current sessionId value
       const currentSessionId = sessionIdRef.current;
-      console.log('Sending message with sessionId:', currentSessionId);
       
       const response = await apiService.sendChatMessage(
         messageText.trim(),
@@ -326,6 +369,9 @@ const VideoCall = () => {
   };
 
   const getUserContext = (user) => {
+    // Use ref to get current value, avoiding stale closure
+    const currentPetId = selectedPetIdRef.current;
+    
     if (!user) {
       return {
         userId: null,
@@ -367,16 +413,20 @@ const VideoCall = () => {
         weight: pet.weight
       }));
       
-      // Use first pet as current pet if available
-      const firstPet = user.pets[0];
-      context.petInfo.currentPet = {
-        id: firstPet.id,
-        name: firstPet.name,
-        type: firstPet.type,
-        age: firstPet.age,
-        breed: firstPet.breed,
-        weight: firstPet.weight
-      };
+      // Use selected pet as current pet if available (use ref value)
+      const selectedPet = user.pets.find(p => p.id === currentPetId);
+      
+      if (selectedPet) {
+        context.petInfo.currentPet = {
+          id: selectedPet.id,
+          name: selectedPet.name,
+          type: selectedPet.type,
+          age: selectedPet.age,
+          breed: selectedPet.breed,
+          weight: selectedPet.weight
+        };
+        console.log('Consultation context - Pet:', selectedPet.name, 'Owner:', user.fullName);
+      }
     }
 
     return context;
@@ -657,6 +707,7 @@ const VideoCall = () => {
           style={{ marginBottom: '24px' }}
         />
         
+        
         <Row gutter={24} style={{ flexWrap: 'wrap' }}>
           <Col xs={24} lg={12} xl={13}>
             <Card>
@@ -803,7 +854,7 @@ const VideoCall = () => {
                 background: '#f5f5f5'
               }}>
                 {/* Speech hint */}
-                {!speechEnabled && messages.length > 0 && (
+                {(!speechEnabled && messages.length > 0) ? (
                   <div style={{
                     marginBottom: '12px',
                     padding: '8px 12px',
@@ -814,7 +865,18 @@ const VideoCall = () => {
                     color: '#0050b3',
                     textAlign: 'center'
                   }}>
-                    💡 Click the <SoundOutlined /> button above to enable AI voice responses
+                    💡 Click the <StopOutlined /> button above to enable AI voice responses
+                  </div>) : (<div style={{
+                    marginBottom: '12px',
+                    padding: '8px 12px',
+                    background: '#e6f7ff',
+                    border: '1px solid #91d5ff',
+                    borderRadius: '8px',
+                    fontSize: '12px',
+                    color: '#0050b3',
+                    textAlign: 'center'
+                  }}>
+                    💡 Click the <SoundOutlined /> button above to disable AI voice responses
                   </div>
                 )}
                 

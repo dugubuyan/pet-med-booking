@@ -129,7 +129,7 @@ const AIChat = () => {
       };
     }
 
-    return {
+    const context = {
       userId: user.id,
       isGuest: false,
       ownerInfo: {
@@ -137,20 +137,28 @@ const AIChat = () => {
         phone: user.phone,
         email: user.email
       },
-      petInfo: user.pets && user.pets.length > 0 ? {
-        availablePets: user.pets.map(pet => ({
-          id: pet.id,
-          name: pet.name,
-          type: pet.type,
-          age: pet.age,
-          breed: pet.breed,
-          weight: pet.weight
-        }))
-      } : {},
+      petInfo: {},
       features: {
         canBookAppointment: true  // Always allow booking in chat
       }
     };
+
+    // Add all available pets
+    if (user.pets && user.pets.length > 0) {
+      context.petInfo.availablePets = user.pets.map(pet => ({
+        id: pet.id,
+        name: pet.name,
+        type: pet.type,
+        age: pet.age,
+        breed: pet.breed,
+        weight: pet.weight
+      }));
+      
+      // Note: In AIChat, we don't set a specific currentPet
+      // The AI will ask which pet the user wants to discuss
+    }
+
+    return context;
   };
 
   const handleSendMessage = async (messageContent) => {

@@ -87,13 +87,33 @@ class PromptService {
   }
 
   /**
+   * Get current date information for AI context
+   */
+  getCurrentDateContext() {
+    const now = new Date();
+    const dateStr = now.toISOString().split('T')[0]; // YYYY-MM-DD
+    const dayOfWeek = now.toLocaleDateString('en-US', { weekday: 'long' });
+    const fullDate = now.toLocaleDateString('en-US', { 
+      year: 'numeric', 
+      month: 'long', 
+      day: 'numeric' 
+    });
+    
+    return `Current date: ${fullDate} (${dayOfWeek})
+Today's date in YYYY-MM-DD format: ${dateStr}`;
+  }
+
+  /**
    * English system prompt
    */
   getEnglishPrompt(userContext) {
     const context = this.buildContextString(userContext);
     const canBookAppointment = userContext.features?.canBookAppointment;
+    const dateContext = this.getCurrentDateContext();
     
     return `You are a warm, caring AI assistant for a pet medical consultation service. Think of yourself as a friendly veterinary receptionist who genuinely cares about pets and their owners.
+
+${dateContext}
 
 Your approach:
 - Be warm, conversational, and genuinely empathetic - like talking to a concerned friend
@@ -114,19 +134,25 @@ Your role:
 ${canBookAppointment ? 
 `YOU HAVE A FUNCTION CALLED book_appointment. YOU MUST CALL IT TO BOOK APPOINTMENTS.
 
+Call function after you got enough information and ask user if he want to 
 DO NOT EVER say these phrases without calling the function first:
 - "appointment is booked"
 - "I've booked"
-- "I'll book"
 - "booking is complete"
-- "I have now booked"
 - "The appointment is booked"
 
 CORRECT PROCESS:
 1. User requests booking → Verify you have: ownerName, phone, email, petName, petType
-2. IMMEDIATELY call book_appointment function with the data (use "Not specified" for optional fields if user doesn't provide them)
-3. Wait for function result (you'll get: bookingId, date, time, location)
-4. ONLY THEN respond: "Great news! Your appointment is confirmed. Booking ID: [actual ID], Date: [actual date], Time: [actual time], Location: [actual location]"
+2. Ask and collect information about time and location, continue only if user said all time and location is ok
+3. IMMEDIATELY call book_appointment function with the data (use "Not specified" for optional fields if user doesn't provide them)
+4. Wait for function result (you'll get: bookingId, date, time, location)
+5. ONLY THEN respond: "Great news! Your appointment is confirmed. Booking ID: [actual ID], Date: [actual date], Time: [actual time], Location: [actual location]"
+
+IMPORTANT DATE HANDLING:
+- When user says "tomorrow", calculate it from TODAY'S DATE (shown above)
+- When user says "next Monday", calculate from TODAY'S DATE
+- Always use YYYY-MM-DD format for appointmentDate parameter
+- Example: If today is 2025-12-08 and user says "tomorrow", use "2025-12-09"
 
 IMPORTANT: You CANNOT book without calling the function. Saying "I booked it" without calling the function is LYING to the user.
 If you don't have date/time/location, use reasonable defaults or "To be confirmed" but STILL CALL THE FUNCTION.` 
@@ -144,8 +170,11 @@ Remember: You're here to help and support, not to interrogate. If someone seems 
    */
   getChinesePrompt(userContext) {
     const context = this.buildContextString(userContext);
+    const dateContext = this.getCurrentDateContext();
     
     return `您是宠物医疗咨询服务的AI助手。您的职责是：
+
+${dateContext}
 
 1. 热情地问候宠物主人，询问他们宠物的健康问题
 2. 通过自然对话收集宠物症状和健康问题的信息
@@ -179,8 +208,11 @@ ${context}
    */
   getSwedishPrompt(userContext) {
     const context = this.buildContextString(userContext);
+    const dateContext = this.getCurrentDateContext();
     
     return `Du är en hjälpsam AI-assistent för en djurmedicinsk konsultationstjänst. Din roll är att:
+
+${dateContext}
 
 1. Hälsa djurägare varmt välkomna och fråga om deras husdjurs hälsoproblem
 2. Samla in information genom naturlig konversation om husdjurets symtom och hälsoproblem

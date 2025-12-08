@@ -153,11 +153,12 @@ class ApiService {
       method: 'POST',
       headers: this.getAuthHeader(),
       body: JSON.stringify({ language })
-    });
+    }, 0); // 0 retries - simple database operation
   }
 
   /**
    * Send chat message
+   * Note: No client-side retries - backend handles retry logic for AI requests
    */
   async sendChatMessage(message, sessionId, userContext, language) {
     const payload = {
@@ -173,7 +174,7 @@ class ApiService {
       method: 'POST',
       headers: this.getAuthHeader(),
       body: JSON.stringify(payload)
-    });
+    }, 0); // 0 retries - backend handles this
   }
 
   /**

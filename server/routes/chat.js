@@ -76,25 +76,10 @@ router.post(
         }))
       ];
 
-      // Log conversation being sent
-      console.log('\n========== BUILDING CONVERSATION ==========');
-      console.log('Session ID:', conversation.sessionId);
-      console.log('Language:', language);
-      console.log('User Context:', JSON.stringify(userContext, null, 2));
-      console.log('History Length:', history.length);
-      console.log('Total Messages (including system):', conversationForGemini.length);
-      console.log('===========================================\n');
+      // Log key conversation info
+      console.log('Chat session:', conversation.sessionId, '| Pet:', userContext.petInfo?.currentPet?.name || 'none');
 
-      // Log full conversation being sent to LLM
-      console.log('\n========== SENDING TO LLM ==========');
-      console.log('System Prompt:');
-      console.log(systemPrompt);
-      console.log('\n--- Conversation History ---');
-      conversationForGemini.forEach((msg, index) => {
-        console.log(`\n[${index}] ${msg.role.toUpperCase()}:`);
-        console.log(msg.content.substring(0, 200) + (msg.content.length > 200 ? '...' : ''));
-      });
-      console.log('\n====================================\n');
+
 
       // Define function calling tools for appointment booking
       const tools = [{
@@ -159,29 +144,35 @@ router.post(
       }];
 
       // Get AI response from Gemini with function calling
-      console.log('⏳ Waiting for LLM response...');
       const startTime = Date.now();
       const aiResponse = await geminiService.sendMessage(conversationForGemini, { tools });
       const duration = Date.now() - startTime;
 
       // Check if AI wants to call a function
       if (aiResponse.type === 'function_call' && aiResponse.functionCall.name === 'book_appointment') {
-        console.log('\n========== BOOKING APPOINTMENT ==========');
-        console.log('Function called by AI');
-        console.log('Arguments:', JSON.stringify(aiResponse.functionCall.args, null, 2));
+        console.log('\n========== FUNCTION CALL DETECTED ==========');
+        console.log('Function Name:', aiResponse.functionCall.name);
+        console.log('Function Arguments (from AI):');
+        console.log(JSON.stringify(aiResponse.functionCall.args, null, 2));
+        console.log('===========================================\n');
         
         const appointmentService = require('../services/appointmentService');
         const appointmentData = aiResponse.functionCall.args;
         
         try {
           // Create appointment
+          console.log('📞 Calling appointmentService.createAppointment...');
           const appointment = await appointmentService.createAppointment(
             appointmentData,
             conversation.id,
             userId === null
           );
           
-          console.log('✅ Appointment created:', appointment.bookingId);
+          console.log('\n========== APPOINTMENT CREATED ==========');
+          console.log('✅ Appointment successfully created!');
+          console.log('Booking ID:', appointment.bookingId);
+          console.log('Full Appointment Data:');
+          console.log(JSON.stringify(appointment, null, 2));
           console.log('=========================================\n');
           
           // Send function result back to AI to generate a response with full appointment details
@@ -199,15 +190,7 @@ router.post(
             createdAt: appointment.createdAt
           };
           
-          const functionResultConversation = [
-            ...conversationForGemini,
-            {
-              role: 'assistant',
-              content: JSON.stringify(aiResponse.functionCall)
-            },
-            {
-              role: 'user',
-              content: `Function result: Appointment successfully booked! Here are the complete details:
+          const functionResultMessage = `Function result: Appointment successfully booked! Here are the complete details:
 - Booking ID: ${appointment.bookingId}
 - Owner: ${appointment.ownerName}
 - Phone: ${appointment.phone}
@@ -222,11 +205,32 @@ ${appointment.appointmentTime ? `- Time: ${appointment.appointmentTime}` : ''}
 ${appointment.location ? `- Location: ${appointment.location}` : ''}
 - Booked at: ${appointment.createdAt}
 
-Please confirm the booking with the user and provide them with all these details. ${appointment.appointmentDate && appointment.appointmentTime && appointment.location ? 'The appointment is fully scheduled.' : 'Let them know the clinic will contact them to confirm the appointment time and location if not specified.'}`
+Please confirm the booking with the user and provide them with all these details. ${appointment.appointmentDate && appointment.appointmentTime && appointment.location ? 'The appointment is fully scheduled.' : 'Let them know the clinic will contact them to confirm the appointment time and location if not specified.'}`;
+          
+          console.log('\n========== SENDING FUNCTION RESULT TO AI ==========');
+          console.log('Sending appointment details back to AI for natural language response...');
+          console.log('Function Result Message:');
+          console.log(functionResultMessage);
+          console.log('===================================================\n');
+          
+          const functionResultConversation = [
+            ...conversationForGemini,
+            {
+              role: 'assistant',
+              content: JSON.stringify(aiResponse.functionCall)
+            },
+            {
+              role: 'user',
+              content: functionResultMessage
             }
           ];
           
           const finalResponse = await geminiService.sendMessage(functionResultConversation);
+          
+          console.log('\n========== AI FINAL RESPONSE ==========');
+          console.log('AI generated confirmation message:');
+          console.log(finalResponse);
+          console.log('=======================================\n');
           
           // Store the final response
           await conversationService.storeMessage(
@@ -246,18 +250,33 @@ Please confirm the booking with the user and provide them with all these details
           });
           
         } catch (error) {
-          console.error('❌ Failed to book appointment:', error);
+          console.error('\n========== APPOINTMENT BOOKING FAILED ==========');
+          console.error('❌ Error:', error.message);
+          console.error('Error Details:', error);
+          console.error('================================================\n');
           
           // Tell AI that booking failed
+          const errorMessage = `Function result: Failed to book appointment. Error: ${error.message}. Please apologize to the user and ask them to try again.`;
+          
+          console.log('\n========== SENDING ERROR TO AI ==========');
+          console.log('Error Message to AI:');
+          console.log(errorMessage);
+          console.log('=========================================\n');
+          
           const errorConversation = [
             ...conversationForGemini,
             {
               role: 'user',
-              content: `Function result: Failed to book appointment. Error: ${error.message}. Please apologize to the user and ask them to try again.`
+              content: errorMessage
             }
           ];
           
           const errorResponse = await geminiService.sendMessage(errorConversation);
+          
+          console.log('\n========== AI ERROR RESPONSE ==========');
+          console.log('AI generated error message:');
+          console.log(errorResponse);
+          console.log('=======================================\n');
           
           await conversationService.storeMessage(
             conversation.id,

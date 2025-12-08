@@ -7,14 +7,19 @@ const axios = require('axios');
 class GeminiService {
   constructor() {
     this.apiKey = process.env.GEMINI_API_KEY;
-    this.baseUrl = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
-    this.maxRetries = 3;
+    this.model = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+    this.baseUrl = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent`;
+    this.maxRetries = process.env.GEMINI_MAX_RETRIES !== undefined 
+      ? parseInt(process.env.GEMINI_MAX_RETRIES) 
+      : 2;
     this.retryDelay = 1000; // Initial delay in ms
     
     // Validate API key on initialization
     if (!this.apiKey) {
       console.error('GEMINI_API_KEY is not set in environment variables');
     }
+    
+    console.log(`🤖 Gemini Service initialized with model: ${this.model}, max retries: ${this.maxRetries}`);
   }
 
   /**
@@ -59,7 +64,7 @@ class GeminiService {
         temperature: options.temperature || 0.7,
         topK: options.topK || 40,
         topP: options.topP || 0.95,
-        maxOutputTokens: options.maxOutputTokens || 1024
+        maxOutputTokens: options.maxOutputTokens || 2048  // Increased from 1024 to prevent truncation
       }
     };
 
@@ -85,7 +90,7 @@ class GeminiService {
       console.log('\n========== LLM REQUEST ==========');
       console.log('Timestamp:', new Date().toISOString());
       console.log('Attempt:', `${attempt}/${this.maxRetries}`);
-      console.log('Model:', 'gemini-2.0-flash');
+      console.log('Model:', this.model);
       console.log('\n--- Request Body ---');
       console.log(JSON.stringify(requestBody, null, 2));
       console.log('\n--- Conversation Contents ---');
@@ -172,8 +177,11 @@ class GeminiService {
 
       // Check if we should retry
       if (attempt < this.maxRetries && this.shouldRetry(error)) {
-        const delay = this.retryDelay * Math.pow(2, attempt - 1); // Exponential backoff
-        console.log(`⚠️  Retrying in ${delay}ms...`);
+        // Use longer delay for rate limit errors (429)
+        const isRateLimit = error.response?.status === 429;
+        const baseDelay = isRateLimit ? 5000 : this.retryDelay; // 5 seconds for rate limits
+        const delay = baseDelay * Math.pow(2, attempt - 1); // Exponential backoff
+        console.log(`⚠️  ${isRateLimit ? 'Rate limit hit.' : ''} Retrying in ${delay}ms...`);
         await this.sleep(delay);
         return this.sendRequestWithRetry(requestBody, attempt + 1);
       }
