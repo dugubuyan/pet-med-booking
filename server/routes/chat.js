@@ -127,15 +127,15 @@ router.post(
               },
               appointmentDate: {
                 type: 'string',
-                description: 'Preferred appointment date in YYYY-MM-DD format (optional, e.g., 2024-12-15)'
+                description: 'Preferred appointment date in YYYY-MM-DD format (optional - OMIT if not specified by user, system will auto-assign, e.g., 2024-12-15)'
               },
               appointmentTime: {
                 type: 'string',
-                description: 'Preferred appointment time (optional, e.g., "10:00 AM", "2:00 PM")'
+                description: 'Preferred appointment time (optional - OMIT if not specified by user, system will auto-assign, e.g., "10:00 AM", "2:00 PM")'
               },
               location: {
                 type: 'string',
-                description: 'Preferred clinic location (optional, e.g., "Downtown Veterinary Clinic", "Northside Animal Hospital", "West End Pet Care")'
+                description: 'Preferred clinic location (optional - OMIT if not specified by user, system will auto-assign a clinic, e.g., "Downtown Veterinary Clinic", "Northside Animal Hospital", "West End Pet Care")'
               }
             },
             required: ['ownerName', 'phone', 'email', 'petName', 'petType']

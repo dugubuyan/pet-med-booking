@@ -24,20 +24,20 @@ class AppointmentService {
     const result = { ...data };
     
     // Fill in appointment date if missing (tomorrow)
-    if (!result.appointmentDate) {
+    if (!result.appointmentDate || result.appointmentDate === 'Not specified') {
       const tomorrow = new Date();
       tomorrow.setDate(tomorrow.getDate() + 1);
       result.appointmentDate = tomorrow.toISOString().split('T')[0]; // YYYY-MM-DD
     }
     
     // Fill in appointment time if missing (random morning slot)
-    if (!result.appointmentTime) {
+    if (!result.appointmentTime || result.appointmentTime === 'Not specified') {
       const times = ['09:00 AM', '10:00 AM', '11:00 AM', '02:00 PM', '03:00 PM'];
       result.appointmentTime = times[Math.floor(Math.random() * times.length)];
     }
     
-    // Fill in location if missing (random clinic)
-    if (!result.location) {
+    // Fill in location if missing or "Not specified" (random clinic)
+    if (!result.location || result.location === 'Not specified') {
       const locations = [
         'Downtown Veterinary Clinic, 123 Main Street',
         'Northside Animal Hospital, 456 North Avenue',
