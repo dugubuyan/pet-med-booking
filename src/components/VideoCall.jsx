@@ -42,6 +42,7 @@ const VideoCall = () => {
   const [transcription, setTranscription] = useState('');
   const [sessionDuration, setSessionDuration] = useState(0);
   const [isListening, setIsListening] = useState(false);
+  const [isListeningStable, setIsListeningStable] = useState(false); // Stable state for UI (prevents flickering)
   const [speechRecognitionEnabled, setSpeechRecognitionEnabled] = useState(false); // User's preference for speech recognition
   
   // AI Chat states
@@ -65,6 +66,8 @@ const VideoCall = () => {
   const selectedPetIdRef = useRef(null); // Ref to track selected pet ID for closures
   const chatEndRef = useRef(null);
   const synthRef = useRef(null);
+  const listeningTimeoutRef = useRef(null); // For debouncing listening state
+  const isRestartingRef = useRef(false); // Prevent multiple restart attempts
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -107,10 +110,28 @@ const VideoCall = () => {
     // Initialize speech synthesis
     if ('speechSynthesis' in window) {
       synthRef.current = window.speechSynthesis;
-      console.log('Speech synthesis initialized');
+      
+      // Load voices (some browsers need this)
+      const loadVoices = () => {
+        const voices = synthRef.current.getVoices();
+        console.log('Speech synthesis initialized with', voices.length, 'voices');
+      };
+      
+      synthRef.current.addEventListener('voiceschanged', loadVoices);
+      loadVoices();
     } else {
       console.warn('Speech synthesis not supported in this browser');
     }
+    
+    // Helper function to get recognition language from i18n
+    const getRecognitionLanguage = (i18nLang) => {
+      const langMap = {
+        'en': 'en-US',
+        'zh': 'zh-CN',
+        'sv': 'sv-SE'
+      };
+      return langMap[i18nLang] || 'en-US';
+    };
     
     // Initialize and start speech recognition immediately
     if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
@@ -118,7 +139,7 @@ const VideoCall = () => {
       recognitionRef.current = new SpeechRecognition();
       recognitionRef.current.continuous = true;
       recognitionRef.current.interimResults = true;
-      recognitionRef.current.lang = 'en-US';
+      recognitionRef.current.lang = getRecognitionLanguage(i18n.language);
 
       recognitionRef.current.onresult = (event) => {
         let finalTranscript = '';
@@ -144,38 +165,66 @@ const VideoCall = () => {
 
       recognitionRef.current.onerror = (event) => {
         console.error('Speech recognition error:', event.error);
-        if (event.error !== 'no-speech') {
+        
+        // Reset restart guard on error
+        isRestartingRef.current = false;
+        
+        // Only show error message for significant errors
+        if (event.error !== 'no-speech' && event.error !== 'aborted') {
           message.error(`Speech recognition error: ${event.error}`);
         }
+        
         setIsListening(false);
       };
 
       recognitionRef.current.onstart = () => {
         console.log('Speech recognition started');
         setIsListening(true);
+        isRestartingRef.current = false; // Clear guard flag on successful start
+        
+        // Clear any pending timeout
+        if (listeningTimeoutRef.current) {
+          clearTimeout(listeningTimeoutRef.current);
+          listeningTimeoutRef.current = null;
+        }
+        
+        // Set stable state immediately when starting
+        setIsListeningStable(true);
       };
 
       recognitionRef.current.onend = () => {
         console.log('Speech recognition ended');
         setIsListening(false);
         
+        // Don't update stable state immediately - wait to see if it restarts
+        listeningTimeoutRef.current = setTimeout(() => {
+          // Only update stable state if still not listening after grace period
+          setIsListeningStable(false);
+        }, 500); // 500ms grace period for auto-restart
+        
         // Auto-restart if user has enabled speech recognition
-        if (speechRecognitionEnabledRef.current) {
-          try {
-            console.log('Auto-restarting speech recognition...');
-            setTimeout(() => {
-              if (recognitionRef.current && speechRecognitionEnabledRef.current) {
-                try {
-                  recognitionRef.current.start();
-                  console.log('Speech recognition restarted successfully');
-                } catch (err) {
-                  console.error('Error in restart:', err);
-                }
+        if (speechRecognitionEnabledRef.current && !isRestartingRef.current) {
+          isRestartingRef.current = true; // Set guard flag
+          
+          console.log('Auto-restarting speech recognition...');
+          setTimeout(() => {
+            if (recognitionRef.current && speechRecognitionEnabledRef.current) {
+              try {
+                recognitionRef.current.start();
+                console.log('Speech recognition restarted successfully');
+              } catch (err) {
+                console.error('Error in restart:', err);
+                // If restart fails, allow future restart attempts
+                isRestartingRef.current = false;
               }
-            }, 100);
-          } catch (error) {
-            console.error('Error restarting speech recognition:', error);
-          }
+            } else {
+              isRestartingRef.current = false;
+            }
+          }, 300); // Increased delay to 300ms for more reliable restart
+        } else if (!speechRecognitionEnabledRef.current) {
+          // User disabled it - update stable state immediately
+          setIsListeningStable(false);
+          isRestartingRef.current = false;
         }
       };
     } else {
@@ -184,6 +233,12 @@ const VideoCall = () => {
 
     return () => {
       stopVideoCall();
+      
+      // Clear listening timeout
+      if (listeningTimeoutRef.current) {
+        clearTimeout(listeningTimeoutRef.current);
+      }
+      
       // Stop any ongoing speech
       if (synthRef.current) {
         synthRef.current.cancel();
@@ -205,6 +260,44 @@ const VideoCall = () => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  // Language change listener for speech recognition
+  useEffect(() => {
+    const getRecognitionLanguage = (i18nLang) => {
+      const langMap = {
+        'en': 'en-US',
+        'zh': 'zh-CN',
+        'sv': 'sv-SE'
+      };
+      return langMap[i18nLang] || 'en-US';
+    };
+
+    const handleLanguageChange = (lng) => {
+      if (recognitionRef.current) {
+        const newLang = getRecognitionLanguage(lng);
+        console.log('Language changed to:', lng, '- Setting recognition to:', newLang);
+        recognitionRef.current.lang = newLang;
+        
+        // Restart if currently listening
+        if (isListening && speechRecognitionEnabledRef.current) {
+          try {
+            recognitionRef.current.stop();
+            setTimeout(() => {
+              if (recognitionRef.current && speechRecognitionEnabledRef.current) {
+                recognitionRef.current.start();
+                console.log('Speech recognition restarted with new language');
+              }
+            }, 100);
+          } catch (error) {
+            console.error('Error restarting recognition after language change:', error);
+          }
+        }
+      }
+    };
+    
+    i18n.on('languageChanged', handleLanguageChange);
+    return () => i18n.off('languageChanged', handleLanguageChange);
+  }, [isListening, i18n]);
+
   const createSession = async () => {
     try {
       console.log('Creating new chat session...');
@@ -224,6 +317,28 @@ const VideoCall = () => {
     // Show initial greeting immediately (no API call needed)
     const user = authService.getCurrentUser();
     const currentPetId = selectedPetIdRef.current;
+    const currentLang = i18n.language;
+    
+    // Language-specific greetings
+    const greetings = {
+      en: {
+        withPet: (name, petName) => `Hello ${name}! I'm here to help with ${petName}'s health. What brings you in today?`,
+        withUser: (name) => `Hello ${name}! I'm here to help with your pet's health. What brings you in today?`,
+        guest: "Hello! I'm here to help with your pet's health. What brings you in today?"
+      },
+      zh: {
+        withPet: (name, petName) => `您好 ${name}！我在这里帮助您解决 ${petName} 的健康问题。您今天有什么担心的吗？`,
+        withUser: (name) => `您好 ${name}！我在这里帮助您解决宠物的健康问题。您今天有什么担心的吗？`,
+        guest: "您好！我是您的AI宠物健康助手。您的宠物有什么不适吗？"
+      },
+      sv: {
+        withPet: (name, petName) => `Hej ${name}! Jag är här för att hjälpa till med ${petName}s hälsa. Vad oroar dig idag?`,
+        withUser: (name) => `Hej ${name}! Jag är här för att hjälpa till med ditt husdjurs hälsa. Vad oroar dig idag?`,
+        guest: "Hej! Jag är din AI-assistent för husdjurshälsa. Vad bekymrar ditt husdjur?"
+      }
+    };
+    
+    const langGreetings = greetings[currentLang] || greetings.en;
     
     let greeting;
     
@@ -231,15 +346,14 @@ const VideoCall = () => {
       const selectedPet = user.pets.find(p => p.id === currentPetId);
       
       if (selectedPet) {
-        const petName = selectedPet.name;
-        greeting = `Hello ${user.fullName}! I'm here to help with ${petName}'s health. What brings you in today?`;
+        greeting = langGreetings.withPet(user.fullName, selectedPet.name);
       } else {
-        greeting = `Hello ${user.fullName}! I'm here to help with your pet's health. What brings you in today?`;
+        greeting = langGreetings.withUser(user.fullName);
       }
     } else if (user) {
-      greeting = `Hello ${user.fullName}! I'm here to help with your pet's health. What brings you in today?`;
+      greeting = langGreetings.withUser(user.fullName);
     } else {
-      greeting = "Hello! I'm here to help with your pet's health. What brings you in today?";
+      greeting = langGreetings.guest;
     }
     
     setMessages([{
@@ -257,8 +371,22 @@ const VideoCall = () => {
     
     const utterance = new SpeechSynthesisUtterance(text);
     
-    // Set voice properties based on language
-    utterance.lang = i18n.language === 'zh' ? 'zh-CN' : i18n.language === 'sv' ? 'sv-SE' : 'en-US';
+    // Better language mapping
+    const langMap = {
+      'en': 'en-US',
+      'zh': 'zh-CN',
+      'sv': 'sv-SE'
+    };
+    utterance.lang = langMap[i18n.language] || 'en-US';
+    
+    // Try to find a voice for the language
+    const voices = synthRef.current.getVoices();
+    const preferredVoice = voices.find(v => v.lang.startsWith(i18n.language));
+    if (preferredVoice) {
+      utterance.voice = preferredVoice;
+      console.log('Using voice:', preferredVoice.name, 'for language:', i18n.language);
+    }
+    
     utterance.rate = 1.0;
     utterance.pitch = 1.0;
     utterance.volume = 1.0;
@@ -300,7 +428,7 @@ const VideoCall = () => {
       }
     }
     
-    message.success(newState ? 'Speech enabled - AI will speak responses' : 'Speech disabled');
+    message.success(newState ? t('videoCall.speechEnabled') : t('videoCall.speechDisabled'));
   };
 
   const sendMessageToAI = async (messageText) => {
@@ -466,10 +594,10 @@ const VideoCall = () => {
         captureImage();
       }, 20000);
       
-      message.success('Video started! Auto-capture enabled every 20 seconds.');
+      message.success(t('videoCall.videoStarted'));
     } catch (error) {
       console.error('Error accessing camera:', error);
-      message.error('Failed to access camera. Please check permissions.');
+      message.error(t('videoCall.cameraAccessFailed'));
     }
   };
 
@@ -500,7 +628,7 @@ const VideoCall = () => {
 
   const toggleSpeechRecognition = () => {
     if (!recognitionRef.current) {
-      message.warning('Speech recognition not supported in this browser');
+      message.warning(t('videoCall.speechRecognitionNotSupported'));
       return;
     }
 
@@ -515,10 +643,10 @@ const VideoCall = () => {
       try {
         recognitionRef.current.start();
         console.log('Starting speech recognition...');
-        message.success('Speech recognition started. Speak to input text.');
+        message.success(t('videoCall.speechRecognitionStarted'));
       } catch (error) {
         console.error('Error starting speech recognition:', error);
-        message.error('Failed to start speech recognition');
+        message.error(t('videoCall.speechRecognitionFailed'));
       }
     }
   };
@@ -527,7 +655,7 @@ const VideoCall = () => {
     console.log('startRecording called, isVideoActive:', isVideoActive);
     
     if (!isVideoActive) {
-      message.warning('Please start the video call first.');
+      message.warning(t('videoCall.startVideoFirst'));
       return;
     }
 
@@ -554,13 +682,13 @@ const VideoCall = () => {
       try {
         recognitionRef.current.start();
         console.log('Speech recognition started with recording');
-        message.success('Recording started! Speech recognition and image capture enabled.');
+        message.success(t('videoCall.recordingStarted'));
       } catch (error) {
         console.error('Error starting speech recognition:', error);
-        message.success('Recording started! Images will be captured every 20 seconds.');
+        message.success(t('videoCall.recordingStarted'));
       }
     } else {
-      message.success('Recording started! Images will be captured every 20 seconds.');
+      message.success(t('videoCall.recordingStarted'));
     }
 
     console.log('Recording started successfully');
@@ -588,7 +716,7 @@ const VideoCall = () => {
       }
     }
 
-    message.success('Recording stopped.');
+    message.success(t('videoCall.recordingStopped'));
   };
 
   const captureImage = () => {
@@ -613,7 +741,7 @@ const VideoCall = () => {
     };
     
     setCapturedImages(prev => [...prev, newImage]);
-    message.info(`Image captured at ${new Date(timestamp).toLocaleTimeString()}`);
+    message.info(t('videoCall.imageCaptured', { time: new Date(timestamp).toLocaleTimeString() }));
   };
 
   const endConsultation = () => {
@@ -637,7 +765,7 @@ const VideoCall = () => {
     };
     
     localStorage.setItem('sessionData', JSON.stringify(sessionData));
-    message.success('Consultation completed! Redirecting to results...');
+    message.success(t('videoCall.consultationCompleted'));
     
     setTimeout(() => {
       // Get bookingId from localStorage if available
@@ -671,33 +799,33 @@ const VideoCall = () => {
     <div className="video-container">
       <div className="video-header">
         <Title level={2} style={{ color: 'white', margin: 0 }}>
-          Pet Video Consultation with AI Assistant
+          {t('videoCall.title')}
         </Title>
         <Text style={{ color: 'rgba(255, 255, 255, 0.9)' }}>
-          Capture images through video while chatting with our AI veterinary assistant
+          {t('videoCall.subtitle')}
         </Text>
       </div>
 
       <div className="video-content">
         <Alert
-          message="AI-Assisted Video Consultation"
+          message={t('videoCall.alertTitle')}
           description={
             <div>
-              <p style={{ marginBottom: '8px' }}><strong>How to start:</strong></p>
+              <p style={{ marginBottom: '8px' }}><strong>{t('videoCall.howToStart')}</strong></p>
               <ol style={{ marginBottom: '8px', paddingLeft: '20px' }}>
-                <li>Click <strong>"Start Video"</strong> to enable your camera</li>
-                <li>Toggle the <strong>Speech Recognition switch</strong> to enable voice input (or use manual text input)</li>
-                <li>Chat with the AI assistant and capture images of your pet</li>
-                <li>Click <strong>"End Consultation"</strong> when finished</li>
+                <li>{t('videoCall.step1')}</li>
+                <li>{t('videoCall.step2')}</li>
+                <li>{t('videoCall.step3')}</li>
+                <li>{t('videoCall.step4')}</li>
               </ol>
-              <p style={{ marginBottom: '8px' }}><strong>Features:</strong></p>
+              <p style={{ marginBottom: '8px' }}><strong>{t('videoCall.features')}</strong></p>
               <ul style={{ marginBottom: '8px', paddingLeft: '20px' }}>
-                <li>📹 <strong>Video Capture</strong> - Click "Capture Now" or automatic capture every 20 seconds</li>
-                <li>🎤 <strong>Speech Recognition</strong> - Toggle switch to speak or type manually</li>
-                <li>🤖 <strong>AI Assistant</strong> - Get real-time guidance on pet health concerns</li>
+                <li>{t('videoCall.feature1')}</li>
+                <li>{t('videoCall.feature2')}</li>
+                <li>{t('videoCall.feature3')}</li>
               </ul>
               <p style={{ margin: 0, fontSize: '12px', color: '#666' }}>
-                <em>Note: AI assessment is preliminary only. Professional veterinary consultation is recommended for accurate diagnosis.</em>
+                <em>{t('videoCall.note')}</em>
               </p>
             </div>
           }
@@ -729,7 +857,7 @@ const VideoCall = () => {
                     color: 'white'
                   }}>
                     <VideoCameraOutlined style={{ fontSize: '4rem', marginBottom: '1rem' }} />
-                    <div>Click "Start Video" to begin</div>
+                    <div>{t('videoCall.clickToBegin')}</div>
                   </div>
                 )}
               </div>
@@ -742,7 +870,7 @@ const VideoCall = () => {
                     icon={<VideoCameraOutlined />}
                     onClick={startVideoCall}
                   >
-                    Start Video
+                    {t('videoCall.startVideo')}
                   </Button>
                 ) : (
                   <Space size="large">
@@ -752,7 +880,7 @@ const VideoCall = () => {
                       onClick={captureImage}
                       disabled={!isVideoActive}
                     >
-                      Capture Now
+                      {t('videoCall.captureNow')}
                     </Button>
                   </Space>
                 )}
@@ -762,7 +890,7 @@ const VideoCall = () => {
             {/* Captured Images */}
             {capturedImages.length > 0 && (
               <Card 
-                title={`Captured Images (${capturedImages.length})`}
+                title={t('videoCall.capturedImagesTitle', { count: capturedImages.length })}
                 style={{ marginTop: '20px' }}
               >
                 <div style={{
@@ -807,7 +935,7 @@ const VideoCall = () => {
                           style={{ cursor: 'pointer', color: '#ff4d4f' }}
                           onClick={() => {
                             setCapturedImages(prev => prev.filter(i => i.id !== img.id));
-                            message.success('Image deleted');
+                            message.success(t('videoCall.imageDeleted'));
                           }}
                         />
                       </div>
@@ -825,7 +953,7 @@ const VideoCall = () => {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
                   <Space>
                     <span style={{ fontSize: '20px' }}>🤖</span>
-                    <span>AI Veterinary Assistant</span>
+                    <span>{t('videoCall.aiAssistant')}</span>
                   </Space>
                   <Button
                     type="text"
@@ -865,7 +993,7 @@ const VideoCall = () => {
                     color: '#0050b3',
                     textAlign: 'center'
                   }}>
-                    💡 Click the <StopOutlined /> button above to enable AI voice responses
+                    {t('videoCall.enableVoiceHint')}
                   </div>) : (<div style={{
                     marginBottom: '12px',
                     padding: '8px 12px',
@@ -876,7 +1004,7 @@ const VideoCall = () => {
                     color: '#0050b3',
                     textAlign: 'center'
                   }}>
-                    💡 Click the <SoundOutlined /> button above to disable AI voice responses
+                    {t('videoCall.disableVoiceHint')}
                   </div>
                 )}
                 
@@ -973,16 +1101,16 @@ const VideoCall = () => {
                   alignItems: 'center',
                   gap: '8px',
                   padding: '6px 12px',
-                  background: isListening ? '#f6ffed' : '#f5f5f5',
+                  background: isListeningStable ? '#f6ffed' : '#f5f5f5',
                   borderRadius: '8px',
-                  border: `1px solid ${isListening ? '#b7eb8f' : '#d9d9d9'}`,
+                  border: `1px solid ${isListeningStable ? '#b7eb8f' : '#d9d9d9'}`,
                   transition: 'all 0.3s ease'
                 }}>
-                  {isListening ? <AudioOutlined style={{ color: '#52c41a', fontSize: '14px' }} /> : <AudioMutedOutlined style={{ color: '#999', fontSize: '14px' }} />}
-                  <span style={{ fontWeight: 500, color: isListening ? '#52c41a' : '#666', fontSize: '13px', whiteSpace: 'nowrap' }}>
-                    {isListening ? 'Voice' : 'Text'}
+                  {isListeningStable ? <AudioOutlined style={{ color: '#52c41a', fontSize: '14px' }} /> : <AudioMutedOutlined style={{ color: '#999', fontSize: '14px' }} />}
+                  <span style={{ fontWeight: 500, color: isListeningStable ? '#52c41a' : '#666', fontSize: '13px', whiteSpace: 'nowrap' }}>
+                    {isListeningStable ? t('videoCall.voice') : t('videoCall.text')}
                   </span>
-                  <Tooltip title="Toggle speech recognition">
+                  <Tooltip title={t('videoCall.toggleSpeechRecognition')}>
                     <Switch
                       checked={speechRecognitionEnabled}
                       onChange={(checked) => {
@@ -990,30 +1118,42 @@ const VideoCall = () => {
                         speechRecognitionEnabledRef.current = checked; // Update ref for closure access
                         
                         if (checked) {
+                          // Starting - set stable state immediately
+                          setIsListeningStable(true);
+                          
                           // Start speech recognition
                           if (recognitionRef.current) {
                             try {
                               recognitionRef.current.start();
                               console.log('Speech recognition enabled via switch');
-                              message.success('Voice input enabled - will auto-restart on silence');
+                              message.success(t('videoCall.voiceInputEnabled'));
                             } catch (error) {
                               console.error('Error starting speech recognition:', error);
-                              message.error('Failed to start speech recognition: ' + error.message);
+                              message.error(t('videoCall.speechRecognitionFailed') + error.message);
                               setSpeechRecognitionEnabled(false);
                               speechRecognitionEnabledRef.current = false;
+                              setIsListeningStable(false);
                             }
                           } else {
-                            message.error('Speech recognition not available');
+                            message.error(t('videoCall.speechRecognitionNotAvailable'));
                             setSpeechRecognitionEnabled(false);
                             speechRecognitionEnabledRef.current = false;
+                            setIsListeningStable(false);
                           }
                         } else {
+                          // Stopping - clear any pending timeouts and update immediately
+                          if (listeningTimeoutRef.current) {
+                            clearTimeout(listeningTimeoutRef.current);
+                            listeningTimeoutRef.current = null;
+                          }
+                          setIsListeningStable(false);
+                          
                           // Stop speech recognition
                           if (recognitionRef.current) {
                             try {
                               recognitionRef.current.stop();
                               console.log('Speech recognition disabled via switch');
-                              message.info('Voice input disabled');
+                              message.info(t('videoCall.voiceInputDisabled'));
                             } catch (error) {
                               console.error('Error stopping speech recognition:', error);
                             }
@@ -1032,7 +1172,7 @@ const VideoCall = () => {
                   size="large"
                   style={{ backgroundColor: '#52c41a' }}
                 >
-                  End Consultation
+                  {t('videoCall.endConsultation')}
                 </Button>
               </div>
 
@@ -1053,7 +1193,7 @@ const VideoCall = () => {
                         handleSendAIMessage();
                       }
                     }}
-                    placeholder="Ask the AI assistant about your pet..."
+                    placeholder={t('videoCall.chatPlaceholder')}
                     disabled={isAILoading}
                     style={{
                       flex: 1,
@@ -1071,7 +1211,7 @@ const VideoCall = () => {
                     disabled={!chatInput.trim() || isAILoading}
                     style={{ borderRadius: '0 6px 6px 0' }}
                   >
-                    Send
+                    {t('videoCall.send')}
                   </Button>
                 </Space.Compact>
               </div>
@@ -1079,21 +1219,22 @@ const VideoCall = () => {
               {/* Session Info */}
               <div style={{
                 padding: '8px 12px',
-                background: isListening ? '#f6ffed' : '#f5f5f5',
+                background: isListeningStable ? '#f6ffed' : '#f5f5f5',
                 borderTop: '1px solid #f0f0f0',
                 fontSize: '12px',
                 color: '#666',
                 transition: 'background 0.3s ease'
               }}>
                 <Space split={<Divider type="vertical" />}>
-                  <span>📸 Images: {capturedImages.length}</span>
+                  <span>🌐 {i18n.language === 'zh' ? '中文' : i18n.language === 'sv' ? 'Svenska' : 'English'}</span>
+                  <span>📸 {t('videoCall.images')}: {capturedImages.length}</span>
                   <span style={{
-                    color: isListening ? '#52c41a' : '#666',
-                    fontWeight: isListening ? 'bold' : 'normal'
+                    color: isListeningStable ? '#52c41a' : '#666',
+                    fontWeight: isListeningStable ? 'bold' : 'normal'
                   }}>
-                    {isListening ? '🎤 Listening' : '⌨️ Manual Input'}
+                    {isListeningStable ? t('videoCall.listening') : t('videoCall.manualInput')}
                   </span>
-                  {isVideoActive && <span style={{ color: '#52c41a' }}>📹 Video Active</span>}
+                  {isVideoActive && <span style={{ color: '#52c41a' }}>{t('videoCall.videoActive')}</span>}
                 </Space>
               </div>
             </Card>

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import {
   Card,
   Typography,
@@ -29,6 +30,7 @@ import apiService from '../services/apiService';
 const { Title, Text, Paragraph } = Typography;
 
 const AppointmentResults = () => {
+  const { t } = useTranslation();
   const [bookingData, setBookingData] = useState(null);
   const [sessionData, setSessionData] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -59,7 +61,7 @@ const AppointmentResults = () => {
     
     if (!bookingId) {
       console.error('❌ No bookingId in URL or localStorage');
-      message.error('No appointment ID provided');
+      message.error(t('results.noAppointmentId'));
       return;
     }
     
@@ -75,11 +77,11 @@ const AppointmentResults = () => {
         setBookingData(response.appointment);
       } else {
         console.error('⚠️ No appointment found');
-        message.error('Appointment not found');
+        message.error(t('results.appointmentNotFound'));
       }
     } catch (error) {
       console.error('❌ Failed to fetch appointment:', error);
-      message.error('Failed to load appointment details');
+      message.error(t('results.failedToLoad'));
     } finally {
       setLoading(false);
     }
@@ -106,13 +108,13 @@ const AppointmentResults = () => {
     linkElement.setAttribute('download', exportFileDefaultName);
     linkElement.click();
     
-    message.success('Report downloaded successfully!');
+    message.success(t('results.reportDownloaded'));
     setLoading(false);
   };
 
   const downloadImages = () => {
     if (!sessionData?.capturedImages?.length) {
-      message.warning('No images to download.');
+      message.warning(t('results.noImages'));
       return;
     }
 
@@ -123,7 +125,7 @@ const AppointmentResults = () => {
       link.click();
     });
 
-    message.success(`Downloaded ${sessionData.capturedImages.length} images!`);
+    message.success(t('results.imagesDownloaded', { count: sessionData.capturedImages.length }));
   };
 
   const formatDuration = (seconds) => {
@@ -133,11 +135,11 @@ const AppointmentResults = () => {
   };
 
   const formatAppointmentDate = (dateStr) => {
-    if (!dateStr) return 'Date to be confirmed';
+    if (!dateStr) return t('results.dateToBeConfirmed');
     // If it's already in YYYY-MM-DD format, convert to readable format
     const date = new Date(dateStr);
     if (isNaN(date.getTime())) return dateStr; // Return as-is if invalid
-    return date.toLocaleDateString('en-US', { 
+    return date.toLocaleDateString(undefined, { 
       weekday: 'long', 
       year: 'numeric', 
       month: 'long', 
@@ -157,17 +159,17 @@ const AppointmentResults = () => {
       <div className="results-container">
         <div className="results-header">
           <Title level={2} style={{ color: 'white', margin: 0 }}>
-            No Appointment Data Found
+            {t('results.noDataFound')}
           </Title>
         </div>
         <div className="results-content">
           <Alert
-            message="No booking information available"
-            description="Please start a new booking to see results here."
+            message={t('results.noBookingInfo')}
+            description={t('results.startNewBooking')}
             type="info"
             action={
               <Button type="primary" onClick={startNewBooking}>
-                Start New Booking
+                {t('results.startNewBooking')}
               </Button>
             }
           />
@@ -180,10 +182,10 @@ const AppointmentResults = () => {
     <div className="results-container">
       <div className="results-header">
         <Title level={2} style={{ color: 'white', margin: 0 }}>
-          Consultation Results
+          {t('results.title')}
         </Title>
         <Text style={{ color: 'rgba(255, 255, 255, 0.9)' }}>
-          Complete summary of your pet's consultation session
+          {t('results.subtitle')}
         </Text>
       </div>
 
@@ -196,10 +198,10 @@ const AppointmentResults = () => {
             <div style={{ textAlign: 'center', marginBottom: '24px' }}>
               <CheckCircleOutlined style={{ fontSize: '48px', color: '#52c41a', marginBottom: '12px' }} />
               <Title level={3} style={{ color: '#52c41a', marginBottom: '8px' }}>
-                ✅ Appointment Scheduled
+                {t('results.appointmentScheduled')}
               </Title>
               <Text style={{ fontSize: '14px', color: '#666' }}>
-                Your consultation has been recorded and an appointment has been created
+                {t('results.consultationRecorded')}
               </Text>
             </div>
 
@@ -210,14 +212,14 @@ const AppointmentResults = () => {
                 <>
                   {isLoggedIn ? (
                     <Alert
-                      message="📧 Confirmation Email Sent"
+                      message={t('results.confirmationEmailSent')}
                       description={
                         <div>
                           <p style={{ marginBottom: '4px' }}>
-                            A confirmation email has been sent to: <strong>{bookingData.email || currentUser?.email}</strong>
+                            {t('results.emailSentTo')} <strong>{bookingData.email || currentUser?.email}</strong>
                           </p>
                           <p style={{ marginBottom: '0', fontSize: '13px' }}>
-                            Please check your inbox for complete appointment details.
+                            {t('results.checkInbox')}
                           </p>
                         </div>
                       }
@@ -227,8 +229,8 @@ const AppointmentResults = () => {
                     />
                   ) : (
                     <Alert
-                      message="📞 We'll Contact You Soon"
-                      description="Your appointment request has been submitted. Our team will contact you via phone to confirm the details."
+                      message={t('results.contactYouSoon')}
+                      description={t('results.appointmentRequestSubmitted')}
                       type="info"
                       showIcon
                       style={{ marginBottom: '20px' }}
@@ -239,7 +241,7 @@ const AppointmentResults = () => {
             })()}
 
             <Divider style={{ margin: '20px 0' }}>
-              <Text strong style={{ color: '#52c41a' }}>Appointment Details</Text>
+              <Text strong style={{ color: '#52c41a' }}>{t('results.appointmentDetails')}</Text>
             </Divider>
 
             {/* Date and Time Section */}
@@ -248,7 +250,7 @@ const AppointmentResults = () => {
                 <Col xs={24} md={12}>
                   <div style={{ marginBottom: '12px' }}>
                     <Text type="secondary" style={{ fontSize: '12px', display: 'block', marginBottom: '6px' }}>
-                      📅 Date
+                      📅 {t('results.date')}
                     </Text>
                     <Text strong style={{ fontSize: '16px', display: 'block', color: '#52c41a' }}>
                       {formatAppointmentDate(bookingData.appointmentDate)}
@@ -258,13 +260,13 @@ const AppointmentResults = () => {
                 <Col xs={24} md={12}>
                   <div style={{ marginBottom: '12px' }}>
                     <Text type="secondary" style={{ fontSize: '12px', display: 'block', marginBottom: '6px' }}>
-                      🕐 Time
+                      🕐 {t('results.time')}
                     </Text>
                     <Text strong style={{ fontSize: '18px', display: 'block', color: '#52c41a' }}>
-                      {bookingData.appointmentTime || 'Time to be confirmed'}
+                      {bookingData.appointmentTime || t('results.timeToBeConfirmed')}
                     </Text>
                     <Text type="secondary" style={{ fontSize: '12px' }}>
-                      Duration: Approximately 30-45 minutes
+                      {t('results.durationApprox')}
                     </Text>
                   </div>
                 </Col>
@@ -274,10 +276,10 @@ const AppointmentResults = () => {
             {/* Location Section */}
             <div style={{ background: '#fff', padding: '16px', borderRadius: '8px', border: '1px solid #d9f7be', marginBottom: '16px' }}>
               <Text type="secondary" style={{ fontSize: '12px', display: 'block', marginBottom: '8px' }}>
-                📍 Location
+                📍 {t('results.location')}
               </Text>
               <Text strong style={{ fontSize: '16px', display: 'block', marginBottom: '8px' }}>
-                {bookingData.location || 'Location to be confirmed'}
+                {bookingData.location || t('results.locationToBeConfirmed')}
               </Text>
               {bookingData.location && (
                 <>
@@ -285,7 +287,7 @@ const AppointmentResults = () => {
                   <Row gutter={16}>
                     <Col span={12}>
                       <Text type="secondary" style={{ fontSize: '12px', display: 'block' }}>
-                        📞 Phone
+                        📞 {t('results.phone')}
                       </Text>
                       <Text style={{ fontSize: '14px' }}>
                         (555) 123-4567
@@ -293,10 +295,10 @@ const AppointmentResults = () => {
                     </Col>
                     <Col span={12}>
                       <Text type="secondary" style={{ fontSize: '12px', display: 'block' }}>
-                        🅿️ Parking
+                        🅿️ {t('results.parking')}
                       </Text>
                       <Text style={{ fontSize: '14px' }}>
-                        Free parking available
+                        {t('results.freeParkingAvailable')}
                       </Text>
                     </Col>
                   </Row>
@@ -309,7 +311,7 @@ const AppointmentResults = () => {
               <Col xs={24} md={12}>
                 <div style={{ padding: '12px', background: '#fff', borderRadius: '8px', border: '1px solid #d9f7be' }}>
                   <Text type="secondary" style={{ fontSize: '12px', display: 'block', marginBottom: '4px' }}>
-                    🏥 Consultation Type
+                    🏥 {t('results.consultationType')}
                   </Text>
                   <Text strong style={{ fontSize: '16px' }}>
                     {bookingData.appointmentType}
@@ -319,7 +321,7 @@ const AppointmentResults = () => {
               <Col xs={24} md={12}>
                 <div style={{ padding: '12px', background: '#fff', borderRadius: '8px', border: '1px solid #d9f7be' }}>
                   <Text type="secondary" style={{ fontSize: '12px', display: 'block', marginBottom: '4px' }}>
-                    📋 Booking Reference
+                    📋 {t('results.bookingReference')}
                   </Text>
                   <Text strong style={{ fontSize: '16px' }}>
                     {bookingData.bookingId}
@@ -332,15 +334,15 @@ const AppointmentResults = () => {
 
             <div style={{ background: '#fffbe6', padding: '12px', borderRadius: '8px', border: '1px solid #ffe58f', marginBottom: '16px' }}>
               <Text style={{ fontSize: '14px' }}>
-                <strong>⏰ What happens next?</strong>
+                <strong>{t('results.whatHappensNext')}</strong>
                 <br />
-                A veterinary professional will review your consultation data and contact you within 24-48 hours to confirm your appointment and discuss your pet's condition.
+                {t('results.whatHappensNextDesc')}
               </Text>
             </div>
 
             <Alert
-              message="⚠️ Emergency Notice"
-              description="If your pet shows signs of severe distress, difficulty breathing, or severe bleeding, contact your local veterinary emergency clinic immediately."
+              message={t('results.emergencyNotice')}
+              description={t('results.emergencyNoticeDesc')}
               type="warning"
               showIcon
             />
@@ -350,7 +352,7 @@ const AppointmentResults = () => {
         {/* Consultation Details Header */}
         <Divider orientation="left" style={{ marginTop: '32px', marginBottom: '24px' }}>
           <Text strong style={{ fontSize: '16px', color: '#1890ff' }}>
-            📋 Consultation Details
+            📋 {t('results.consultationDetails')}
           </Text>
         </Divider>
 
@@ -362,22 +364,22 @@ const AppointmentResults = () => {
                 title={
                   <Space>
                     <ClockCircleOutlined />
-                    Session Summary
+                    {t('results.sessionSummary')}
                   </Space>
                 }
                 style={{ marginBottom: '24px' }}
               >
                 <Descriptions column={1} size="small">
-                  <Descriptions.Item label="Duration">
+                  <Descriptions.Item label={t('results.duration')}>
                     {formatDuration(sessionData.sessionDuration || 0)}
                   </Descriptions.Item>
-                  <Descriptions.Item label="Images Captured">
-                    {sessionData.capturedImages?.length || 0} images
+                  <Descriptions.Item label={t('results.imagesCaptured')}>
+                    {sessionData.capturedImages?.length || 0} {t('results.images')}
                   </Descriptions.Item>
-                  <Descriptions.Item label="Voice Recording">
-                    {sessionData.transcription ? 'Available' : 'Not available'}
+                  <Descriptions.Item label={t('results.voiceRecording')}>
+                    {sessionData.transcription ? t('results.available') : t('results.notAvailable')}
                   </Descriptions.Item>
-                  <Descriptions.Item label="Completed At">
+                  <Descriptions.Item label={t('results.completedAt')}>
                     {new Date(sessionData.endTime).toLocaleString()}
                   </Descriptions.Item>
                 </Descriptions>
@@ -390,23 +392,23 @@ const AppointmentResults = () => {
                 title={
                   <Space>
                     <HeartOutlined />
-                    Pet Information
+                    {t('results.petInfo')}
                   </Space>
                 }
                 style={{ marginBottom: '24px' }}
               >
                 <Descriptions column={1} size="small">
-                  <Descriptions.Item label="Pet Name">
+                  <Descriptions.Item label={t('booking.petName')}>
                     {bookingData.petName}
                   </Descriptions.Item>
-                  <Descriptions.Item label="Type">
+                  <Descriptions.Item label={t('results.type')}>
                     {bookingData.petType}
                   </Descriptions.Item>
-                  <Descriptions.Item label="Age">
+                  <Descriptions.Item label={t('results.age')}>
                     {bookingData.petAge}
                   </Descriptions.Item>
                   {bookingData.petBreed && (
-                    <Descriptions.Item label="Breed">{bookingData.petBreed}</Descriptions.Item>
+                    <Descriptions.Item label={t('results.breed')}>{bookingData.petBreed}</Descriptions.Item>
                   )}
                 </Descriptions>
               </Card>
@@ -416,7 +418,7 @@ const AppointmentResults = () => {
           <Col xs={24} lg={12}>
             {/* Timeline */}
             <Card
-              title="Consultation Timeline"
+              title={t('results.timeline')}
               style={{ marginBottom: '24px' }}
             >
               <Timeline
@@ -425,9 +427,9 @@ const AppointmentResults = () => {
                     color: 'blue',
                     children: (
                       <div>
-                        <Text strong>Session Started</Text>
+                        <Text strong>{t('results.sessionStarted')}</Text>
                         <br />
-                        <Text type="secondary">Camera and audio activated</Text>
+                        <Text type="secondary">{t('results.cameraActivated')}</Text>
                       </div>
                     ),
                   },
@@ -435,10 +437,10 @@ const AppointmentResults = () => {
                     color: 'orange',
                     children: (
                       <div>
-                        <Text strong>Images Captured</Text>
+                        <Text strong>{t('results.imagesCapturedTimeline')}</Text>
                         <br />
                         <Text type="secondary">
-                          {sessionData.capturedImages.length} images recorded
+                          {t('results.imagesRecorded', { count: sessionData.capturedImages.length })}
                         </Text>
                       </div>
                     ),
@@ -447,9 +449,9 @@ const AppointmentResults = () => {
                     color: 'purple',
                     children: (
                       <div>
-                        <Text strong>Voice Recorded</Text>
+                        <Text strong>{t('results.voiceRecorded')}</Text>
                         <br />
-                        <Text type="secondary">Symptoms transcribed</Text>
+                        <Text type="secondary">{t('results.symptomsTranscribed')}</Text>
                       </div>
                     ),
                   }] : []),
@@ -457,10 +459,10 @@ const AppointmentResults = () => {
                     color: 'green',
                     children: (
                       <div>
-                        <Text strong>Session Completed</Text>
+                        <Text strong>{t('results.sessionCompleted')}</Text>
                         <br />
                         <Text type="secondary">
-                          {sessionData?.endTime ? new Date(sessionData.endTime).toLocaleString() : 'Just now'}
+                          {sessionData?.endTime ? new Date(sessionData.endTime).toLocaleString() : t('results.justNow')}
                         </Text>
                       </div>
                     ),
@@ -477,7 +479,7 @@ const AppointmentResults = () => {
             title={
               <Space>
                 <SoundOutlined />
-                Recorded Symptoms
+                {t('results.recordedSymptoms')}
               </Space>
             }
             style={{ marginBottom: '24px' }}
@@ -502,14 +504,14 @@ const AppointmentResults = () => {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Space>
                   <CameraOutlined />
-                  Captured Images ({sessionData.capturedImages.length})
+                  {t('results.capturedImagesTitle', { count: sessionData.capturedImages.length })}
                 </Space>
                 <Button
                   type="link"
                   icon={<DownloadOutlined />}
                   onClick={downloadImages}
                 >
-                  Download All
+                  {t('results.downloadAll')}
                 </Button>
               </div>
             }
@@ -543,7 +545,7 @@ const AppointmentResults = () => {
               onClick={downloadReport}
               loading={loading}
             >
-              Download Report
+              {t('results.downloadReport')}
             </Button>
             <Button
               type="primary"
@@ -551,7 +553,7 @@ const AppointmentResults = () => {
               icon={<HomeOutlined />}
               onClick={startNewBooking}
             >
-              New Consultation
+              {t('results.newConsultation')}
             </Button>
           </Space>
         </div>

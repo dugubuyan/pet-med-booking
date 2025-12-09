@@ -67,9 +67,17 @@ router.post(
       // Build conversation for Gemini (include system prompt as first message)
       const systemPrompt = promptService.getSystemPrompt(language, userContext);
       
+      // Get language-specific acknowledgment
+      const acknowledgments = {
+        en: 'I understand. I will help as a pet health consultation assistant.',
+        zh: '我明白了。我将作为宠物健康咨询助手为您提供帮助。',
+        sv: 'Jag förstår. Jag kommer att hjälpa som assistent för husdjurshälsa.'
+      };
+      const acknowledgment = acknowledgments[language] || acknowledgments.en;
+      
       const conversationForGemini = [
         { role: 'user', content: systemPrompt },
-        { role: 'assistant', content: 'I understand. I will help as a pet health consultation assistant.' },
+        { role: 'assistant', content: acknowledgment },
         ...history.map(msg => ({
           role: msg.role,
           content: msg.content
@@ -77,7 +85,7 @@ router.post(
       ];
 
       // Log key conversation info
-      console.log('Chat session:', conversation.sessionId, '| Pet:', userContext.petInfo?.currentPet?.name || 'none');
+      console.log('Chat session:', conversation.sessionId, '| Language:', language, '| Pet:', userContext.petInfo?.currentPet?.name || 'none');
 
 
 

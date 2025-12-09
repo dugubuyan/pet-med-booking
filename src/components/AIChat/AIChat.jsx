@@ -177,6 +177,9 @@ const AIChat = () => {
       const user = authService.getCurrentUser();
       const userContext = getUserContext(user);
       
+      console.log('🌐 Sending message with language:', i18n.language);
+      console.log('📝 Message:', messageContent);
+      
       const response = await apiService.sendChatMessage(
         messageContent,
         sessionId,
