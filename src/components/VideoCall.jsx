@@ -55,6 +55,7 @@ const VideoCall = () => {
   const [speechInitialized, setSpeechInitialized] = useState(false);
   const [selectedPetId, setSelectedPetId] = useState(null); // Track selected pet
   const [currentUser, setCurrentUser] = useState(null); // Store user in state
+  const [currentBookingId, setCurrentBookingId] = useState(null); // Track booking ID for current session
   
   const videoRef = useRef(null);
   const streamRef = useRef(null);
@@ -133,7 +134,7 @@ const VideoCall = () => {
       return langMap[i18nLang] || 'en-US';
     };
     
-    // Initialize and start speech recognition immediately
+    // Initialize speech recognition (but don't start automatically)
     if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
       recognitionRef.current = new SpeechRecognition();
@@ -156,39 +157,25 @@ const VideoCall = () => {
         
         if (finalTranscript && finalTranscript.trim()) {
           console.log('Final transcript:', finalTranscript);
-          setTranscription(prev => prev + finalTranscript);
-          
-          // Auto-submit the message when in voice mode
-          sendMessageToAI(finalTranscript.trim());
+          // Add transcript to chat input instead of auto-sending
+          setChatInput(prev => prev + (prev ? ' ' : '') + finalTranscript.trim());
         }
       };
 
       recognitionRef.current.onerror = (event) => {
         console.error('Speech recognition error:', event.error);
         
-        // Reset restart guard on error
-        isRestartingRef.current = false;
-        
-        // Only show error message for significant errors
+        // Only show error message for significant errors (not no-speech or aborted)
         if (event.error !== 'no-speech' && event.error !== 'aborted') {
           message.error(`Speech recognition error: ${event.error}`);
         }
         
-        setIsListening(false);
+        // Let onend handle restart
       };
 
       recognitionRef.current.onstart = () => {
         console.log('Speech recognition started');
         setIsListening(true);
-        isRestartingRef.current = false; // Clear guard flag on successful start
-        
-        // Clear any pending timeout
-        if (listeningTimeoutRef.current) {
-          clearTimeout(listeningTimeoutRef.current);
-          listeningTimeoutRef.current = null;
-        }
-        
-        // Set stable state immediately when starting
         setIsListeningStable(true);
       };
 
@@ -196,35 +183,23 @@ const VideoCall = () => {
         console.log('Speech recognition ended');
         setIsListening(false);
         
-        // Don't update stable state immediately - wait to see if it restarts
-        listeningTimeoutRef.current = setTimeout(() => {
-          // Only update stable state if still not listening after grace period
-          setIsListeningStable(false);
-        }, 500); // 500ms grace period for auto-restart
-        
         // Auto-restart if user has enabled speech recognition
-        if (speechRecognitionEnabledRef.current && !isRestartingRef.current) {
-          isRestartingRef.current = true; // Set guard flag
-          
+        if (speechRecognitionEnabledRef.current) {
           console.log('Auto-restarting speech recognition...');
+          
           setTimeout(() => {
             if (recognitionRef.current && speechRecognitionEnabledRef.current) {
               try {
                 recognitionRef.current.start();
                 console.log('Speech recognition restarted successfully');
               } catch (err) {
-                console.error('Error in restart:', err);
-                // If restart fails, allow future restart attempts
-                isRestartingRef.current = false;
+                console.error('Error restarting speech recognition:', err);
               }
-            } else {
-              isRestartingRef.current = false;
             }
-          }, 300); // Increased delay to 300ms for more reliable restart
-        } else if (!speechRecognitionEnabledRef.current) {
-          // User disabled it - update stable state immediately
+          }, 100);
+        } else {
+          // User disabled it - update stable state
           setIsListeningStable(false);
-          isRestartingRef.current = false;
         }
       };
     } else {
@@ -283,8 +258,12 @@ const VideoCall = () => {
             recognitionRef.current.stop();
             setTimeout(() => {
               if (recognitionRef.current && speechRecognitionEnabledRef.current) {
-                recognitionRef.current.start();
-                console.log('Speech recognition restarted with new language');
+                try {
+                  recognitionRef.current.start();
+                  console.log('Speech recognition restarted with new language');
+                } catch (error) {
+                  console.error('Error starting recognition after language change:', error);
+                }
               }
             }, 100);
           } catch (error) {
@@ -474,10 +453,10 @@ const VideoCall = () => {
       setMessages(prev => [...prev, assistantMessage]);
       speakText(response.response);
       
-      // If appointment was booked, store the bookingId
+      // If appointment was booked, store the bookingId in state
       if (response.appointmentBooked && response.bookingId) {
         console.log('✅ Appointment booked in VideoCall! BookingId:', response.bookingId);
-        localStorage.setItem('currentBookingId', response.bookingId);
+        setCurrentBookingId(response.bookingId);
         message.success(`Appointment booked! ID: ${response.bookingId}`);
       }
     } catch (err) {
@@ -616,14 +595,9 @@ const VideoCall = () => {
       clearInterval(sessionTimerRef.current);
       sessionTimerRef.current = null;
     }
-
-    if (recognitionRef.current && isListening) {
-      recognitionRef.current.stop();
-    }
     
     setIsVideoActive(false);
     setIsRecording(false);
-    setIsListening(false);
   };
 
   const toggleSpeechRecognition = () => {
@@ -632,21 +606,33 @@ const VideoCall = () => {
       return;
     }
 
-    if (isListening) {
-      try {
-        recognitionRef.current.stop();
-        console.log('Stopping speech recognition...');
-      } catch (error) {
-        console.error('Error stopping speech recognition:', error);
-      }
-    } else {
+    const newState = !speechRecognitionEnabled;
+    setSpeechRecognitionEnabled(newState);
+    speechRecognitionEnabledRef.current = newState;
+
+    if (newState) {
+      // Enable speech recognition
       try {
         recognitionRef.current.start();
-        console.log('Starting speech recognition...');
+        console.log('Speech recognition enabled');
         message.success(t('videoCall.speechRecognitionStarted'));
+        setIsListeningStable(true);
       } catch (error) {
         console.error('Error starting speech recognition:', error);
         message.error(t('videoCall.speechRecognitionFailed'));
+        setSpeechRecognitionEnabled(false);
+        speechRecognitionEnabledRef.current = false;
+        setIsListeningStable(false);
+      }
+    } else {
+      // Disable speech recognition
+      try {
+        recognitionRef.current.stop();
+        console.log('Speech recognition disabled');
+        message.info(t('videoCall.voiceInputDisabled'));
+        setIsListeningStable(false);
+      } catch (error) {
+        console.error('Error stopping speech recognition:', error);
       }
     }
   };
@@ -677,20 +663,7 @@ const VideoCall = () => {
       captureImage();
     }, 20000);
 
-    // Start speech recognition
-    if (recognitionRef.current && !isListening) {
-      try {
-        recognitionRef.current.start();
-        console.log('Speech recognition started with recording');
-        message.success(t('videoCall.recordingStarted'));
-      } catch (error) {
-        console.error('Error starting speech recognition:', error);
-        message.success(t('videoCall.recordingStarted'));
-      }
-    } else {
-      message.success(t('videoCall.recordingStarted'));
-    }
-
+    message.success(t('videoCall.recordingStarted'));
     console.log('Recording started successfully');
   };
 
@@ -705,15 +678,6 @@ const VideoCall = () => {
     if (sessionTimerRef.current) {
       clearInterval(sessionTimerRef.current);
       sessionTimerRef.current = null;
-    }
-
-    if (recognitionRef.current && isListening) {
-      try {
-        recognitionRef.current.stop();
-        console.log('Stopping speech recognition...');
-      } catch (error) {
-        console.error('Error stopping speech recognition:', error);
-      }
     }
 
     message.success(t('videoCall.recordingStopped'));
@@ -745,6 +709,18 @@ const VideoCall = () => {
   };
 
   const endConsultation = () => {
+    // Stop speech recognition
+    if (recognitionRef.current && speechRecognitionEnabled) {
+      try {
+        setSpeechRecognitionEnabled(false);
+        speechRecognitionEnabledRef.current = false;
+        recognitionRef.current.stop();
+        console.log('Speech recognition stopped on consultation end');
+      } catch (error) {
+        console.error('Error stopping speech recognition:', error);
+      }
+    }
+    
     stopRecording();
     stopVideoCall();
     
@@ -768,24 +744,14 @@ const VideoCall = () => {
     message.success(t('videoCall.consultationCompleted'));
     
     setTimeout(() => {
-      // Get bookingId from localStorage if available
-      const bookingId = localStorage.getItem('currentBookingId');
-      if (bookingId) {
-        navigate(`/results?bookingId=${bookingId}`);
-        return;
+      // Navigate to results with bookingId if available
+      if (currentBookingId) {
+        navigate(`/results?bookingId=${currentBookingId}`);
+      } else {
+        // No appointment was booked, show message
+        message.info('Session completed. No appointment was booked.');
+        navigate('/');
       }
-      
-      // Fallback: check old format
-      const booking = localStorage.getItem('currentBooking');
-      if (booking) {
-        const bookingInfo = JSON.parse(booking);
-        if (bookingInfo.bookingId) {
-          navigate(`/results?bookingId=${bookingInfo.bookingId}`);
-          return;
-        }
-      }
-      
-      navigate('/results');
     }, 1500);
   };
 

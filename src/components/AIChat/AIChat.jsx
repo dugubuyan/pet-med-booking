@@ -18,12 +18,6 @@ const AIChat = () => {
 
   useEffect(() => {
     initializeSession();
-    
-    // Check if there's a stored bookingId from a previous booking
-    const storedBookingId = localStorage.getItem('currentBookingId');
-    if (storedBookingId) {
-      setCurrentBookingId(storedBookingId);
-    }
   }, []);
 
   const initializeSession = async () => {
@@ -206,9 +200,6 @@ const AIChat = () => {
         console.log('✅ Appointment booked! BookingId:', response.bookingId);
         setCurrentBookingId(response.bookingId);
         
-        // Store in localStorage as well for persistence
-        localStorage.setItem('currentBookingId', response.bookingId);
-        
         // Add a helpful system message
         const systemMessage = {
           content: `✅ Your appointment has been successfully booked! You can now click the "📋 View Results" button at the top to see your complete appointment details, or continue chatting if you have more questions.`,
@@ -248,7 +239,6 @@ const AIChat = () => {
 
   const startNewChat = async () => {
     localStorage.removeItem('chatSessionId');
-    localStorage.removeItem('currentBookingId');
     setMessages([]);
     setSessionId(null);
     setCurrentBookingId(null);
@@ -256,9 +246,8 @@ const AIChat = () => {
   };
 
   const viewAppointmentResults = () => {
-    const bookingId = currentBookingId || localStorage.getItem('currentBookingId');
-    if (bookingId) {
-      navigate(`/results?bookingId=${bookingId}`);
+    if (currentBookingId) {
+      navigate(`/results?bookingId=${currentBookingId}`);
     } else {
       alert('No appointment has been booked yet in this conversation.');
     }

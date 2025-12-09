@@ -47,20 +47,14 @@ const AppointmentResults = () => {
       setSessionData(JSON.parse(session));
     }
 
-    // Get bookingId from URL parameter first, then fallback to localStorage
+    // Get bookingId from URL parameter ONLY
     const urlParams = new URLSearchParams(window.location.search);
-    let bookingId = urlParams.get('bookingId');
+    const bookingId = urlParams.get('bookingId');
+    
+    console.log('🔗 BookingId from URL:', bookingId);
     
     if (!bookingId) {
-      // Try to get from localStorage as fallback
-      bookingId = localStorage.getItem('currentBookingId');
-      console.log('🔗 BookingId from localStorage:', bookingId);
-    } else {
-      console.log('🔗 BookingId from URL:', bookingId);
-    }
-    
-    if (!bookingId) {
-      console.error('❌ No bookingId in URL or localStorage');
+      console.error('❌ No bookingId in URL');
       message.error(t('results.noAppointmentId'));
       return;
     }
