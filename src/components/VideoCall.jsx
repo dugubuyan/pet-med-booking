@@ -69,6 +69,8 @@ const VideoCall = () => {
   const synthRef = useRef(null);
   const listeningTimeoutRef = useRef(null); // For debouncing listening state
   const isRestartingRef = useRef(false); // Prevent multiple restart attempts
+  const isSpeakingRef = useRef(false); // Track if speech synthesis is active
+  const textareaRef = useRef(null); // For auto-resizing textarea
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -156,51 +158,56 @@ const VideoCall = () => {
         }
         
         if (finalTranscript && finalTranscript.trim()) {
-          console.log('Final transcript:', finalTranscript);
           // Add transcript to chat input instead of auto-sending
           setChatInput(prev => prev + (prev ? ' ' : '') + finalTranscript.trim());
         }
       };
 
       recognitionRef.current.onerror = (event) => {
-        console.error('Speech recognition error:', event.error);
-        
-        // Only show error message for significant errors (not no-speech or aborted)
-        if (event.error !== 'no-speech' && event.error !== 'aborted') {
-          message.error(`Speech recognition error: ${event.error}`);
+        // Silently handle common errors that don't need user notification
+        if (event.error === 'no-speech' || event.error === 'aborted') {
+          return;
         }
         
-        // Let onend handle restart
+        // Only log and show significant errors
+        console.error('Speech recognition error:', event.error);
+        if (event.error !== 'network') {
+          message.error(`Speech recognition error: ${event.error}`);
+        }
       };
 
       recognitionRef.current.onstart = () => {
-        console.log('Speech recognition started');
         setIsListening(true);
-        setIsListeningStable(true);
+        // Keep stable state true to prevent flickering
+        if (speechRecognitionEnabledRef.current) {
+          setIsListeningStable(true);
+        }
       };
 
       recognitionRef.current.onend = () => {
-        console.log('Speech recognition ended');
         setIsListening(false);
         
-        // Auto-restart if user has enabled speech recognition
-        if (speechRecognitionEnabledRef.current) {
-          console.log('Auto-restarting speech recognition...');
-          
-          setTimeout(() => {
-            if (recognitionRef.current && speechRecognitionEnabledRef.current) {
-              try {
-                recognitionRef.current.start();
-                console.log('Speech recognition restarted successfully');
-              } catch (err) {
+        // Don't auto-restart if speech synthesis is active or user disabled it
+        if (isSpeakingRef.current || !speechRecognitionEnabledRef.current) {
+          if (!speechRecognitionEnabledRef.current) {
+            setIsListeningStable(false);
+          }
+          return;
+        }
+        
+        // Auto-restart with debounce to prevent rapid restarts
+        setTimeout(() => {
+          if (recognitionRef.current && speechRecognitionEnabledRef.current && !isSpeakingRef.current) {
+            try {
+              recognitionRef.current.start();
+            } catch (err) {
+              // Silently handle restart errors (likely already started)
+              if (err.message && !err.message.includes('already started')) {
                 console.error('Error restarting speech recognition:', err);
               }
             }
-          }, 100);
-        } else {
-          // User disabled it - update stable state
-          setIsListeningStable(false);
-        }
+          }
+        }, 300);
       };
     } else {
       console.warn('Speech recognition not supported in this browser');
@@ -235,6 +242,15 @@ const VideoCall = () => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
+  // Auto-resize textarea based on content
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (textarea) {
+      textarea.style.height = 'auto';
+      textarea.style.height = Math.min(textarea.scrollHeight, 150) + 'px';
+    }
+  }, [chatInput]);
+
   // Language change listener for speech recognition
   useEffect(() => {
     const getRecognitionLanguage = (i18nLang) => {
@@ -249,7 +265,6 @@ const VideoCall = () => {
     const handleLanguageChange = (lng) => {
       if (recognitionRef.current) {
         const newLang = getRecognitionLanguage(lng);
-        console.log('Language changed to:', lng, '- Setting recognition to:', newLang);
         recognitionRef.current.lang = newLang;
         
         // Restart if currently listening
@@ -260,14 +275,13 @@ const VideoCall = () => {
               if (recognitionRef.current && speechRecognitionEnabledRef.current) {
                 try {
                   recognitionRef.current.start();
-                  console.log('Speech recognition restarted with new language');
                 } catch (error) {
-                  console.error('Error starting recognition after language change:', error);
+                  // Silently handle restart errors
                 }
               }
-            }, 100);
+            }, 300);
           } catch (error) {
-            console.error('Error restarting recognition after language change:', error);
+            // Silently handle stop errors
           }
         }
       }
@@ -348,6 +362,17 @@ const VideoCall = () => {
     // Cancel any ongoing speech
     synthRef.current.cancel();
     
+    // Stop speech recognition to prevent recognizing synthesized speech
+    const wasListening = speechRecognitionEnabledRef.current;
+    if (wasListening && recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+        console.log('Speech recognition stopped before synthesis');
+      } catch (error) {
+        console.error('Error stopping recognition before synthesis:', error);
+      }
+    }
+    
     const utterance = new SpeechSynthesisUtterance(text);
     
     // Better language mapping
@@ -371,18 +396,41 @@ const VideoCall = () => {
     utterance.volume = 1.0;
     
     utterance.onstart = () => {
-      console.log('Speech started');
       setIsSpeaking(true);
+      isSpeakingRef.current = true;
     };
     
     utterance.onend = () => {
-      console.log('Speech ended');
       setIsSpeaking(false);
+      isSpeakingRef.current = false;
+      
+      // Restart speech recognition if it was active before
+      if (wasListening && recognitionRef.current && speechRecognitionEnabledRef.current) {
+        setTimeout(() => {
+          try {
+            recognitionRef.current.start();
+          } catch (error) {
+            // Silently handle restart errors
+          }
+        }, 300);
+      }
     };
     
     utterance.onerror = (event) => {
-      console.error('Speech error:', event);
+      console.error('Speech synthesis error:', event);
       setIsSpeaking(false);
+      isSpeakingRef.current = false;
+      
+      // Restart speech recognition even on error if it was active before
+      if (wasListening && recognitionRef.current && speechRecognitionEnabledRef.current) {
+        setTimeout(() => {
+          try {
+            recognitionRef.current.start();
+          } catch (error) {
+            // Silently handle restart errors
+          }
+        }, 300);
+      }
     };
     
     synthRef.current.speak(utterance);
@@ -957,9 +1005,15 @@ const VideoCall = () => {
                     borderRadius: '8px',
                     fontSize: '12px',
                     color: '#0050b3',
-                    textAlign: 'center'
+                    textAlign: 'center',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '4px'
                   }}>
-                    {t('videoCall.enableVoiceHint')}
+                    <span>💡 {t('videoCall.enableVoiceHintPrefix')}</span>
+                    <StopOutlined style={{ fontSize: '12px' }} />
+                    <span>{t('videoCall.enableVoiceHintSuffix')}</span>
                   </div>) : (<div style={{
                     marginBottom: '12px',
                     padding: '8px 12px',
@@ -968,9 +1022,15 @@ const VideoCall = () => {
                     borderRadius: '8px',
                     fontSize: '12px',
                     color: '#0050b3',
-                    textAlign: 'center'
+                    textAlign: 'center',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '4px'
                   }}>
-                    {t('videoCall.disableVoiceHint')}
+                    <span>💡 {t('videoCall.disableVoiceHintPrefix')}</span>
+                    <SoundOutlined style={{ fontSize: '12px' }} />
+                    <span>{t('videoCall.disableVoiceHintSuffix')}</span>
                   </div>
                 )}
                 
@@ -1084,18 +1144,17 @@ const VideoCall = () => {
                         speechRecognitionEnabledRef.current = checked; // Update ref for closure access
                         
                         if (checked) {
-                          // Starting - set stable state immediately
+                          // Starting - set stable state immediately to prevent flickering
                           setIsListeningStable(true);
                           
                           // Start speech recognition
                           if (recognitionRef.current) {
                             try {
                               recognitionRef.current.start();
-                              console.log('Speech recognition enabled via switch');
                               message.success(t('videoCall.voiceInputEnabled'));
                             } catch (error) {
                               console.error('Error starting speech recognition:', error);
-                              message.error(t('videoCall.speechRecognitionFailed') + error.message);
+                              message.error(t('videoCall.speechRecognitionFailed'));
                               setSpeechRecognitionEnabled(false);
                               speechRecognitionEnabledRef.current = false;
                               setIsListeningStable(false);
@@ -1107,21 +1166,16 @@ const VideoCall = () => {
                             setIsListeningStable(false);
                           }
                         } else {
-                          // Stopping - clear any pending timeouts and update immediately
-                          if (listeningTimeoutRef.current) {
-                            clearTimeout(listeningTimeoutRef.current);
-                            listeningTimeoutRef.current = null;
-                          }
+                          // Stopping - update state immediately to prevent flickering
                           setIsListeningStable(false);
                           
                           // Stop speech recognition
                           if (recognitionRef.current) {
                             try {
                               recognitionRef.current.stop();
-                              console.log('Speech recognition disabled via switch');
                               message.info(t('videoCall.voiceInputDisabled'));
                             } catch (error) {
-                              console.error('Error stopping speech recognition:', error);
+                              // Silently handle stop errors
                             }
                           }
                         }
@@ -1148,9 +1202,9 @@ const VideoCall = () => {
                 borderTop: '1px solid #f0f0f0',
                 background: '#fff'
               }}>
-                <Space.Compact style={{ width: '100%' }}>
-                  <input
-                    type="text"
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
+                  <textarea
+                    ref={textareaRef}
                     value={chatInput}
                     onChange={(e) => setChatInput(e.target.value)}
                     onKeyDown={(e) => {
@@ -1161,13 +1215,20 @@ const VideoCall = () => {
                     }}
                     placeholder={t('videoCall.chatPlaceholder')}
                     disabled={isAILoading}
+                    rows={1}
                     style={{
                       flex: 1,
                       padding: '8px 12px',
                       border: '1px solid #d9d9d9',
-                      borderRadius: '6px 0 0 6px',
+                      borderRadius: '6px',
                       fontSize: '14px',
-                      outline: 'none'
+                      outline: 'none',
+                      resize: 'none',
+                      fontFamily: 'inherit',
+                      lineHeight: '1.5',
+                      // minHeight: '40px',
+                      // maxHeight: '150px',
+                      overflowY: 'auto'
                     }}
                   />
                   <Button
@@ -1175,11 +1236,16 @@ const VideoCall = () => {
                     icon={<SendOutlined />}
                     onClick={handleSendAIMessage}
                     disabled={!chatInput.trim() || isAILoading}
-                    style={{ borderRadius: '0 6px 6px 0' }}
+                    size="large"
+                    style={{ 
+                      borderRadius: '6px',
+                      height: '40px',
+                      minWidth: '80px'
+                    }}
                   >
                     {t('videoCall.send')}
                   </Button>
-                </Space.Compact>
+                </div>
               </div>
 
               {/* Session Info */}
