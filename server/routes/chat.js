@@ -99,15 +99,15 @@ router.post(
             properties: {
               ownerName: {
                 type: 'string',
-                description: 'Full name of the pet owner'
+                description: 'Full name of the pet parent'
               },
               phone: {
                 type: 'string',
-                description: 'Phone number of the pet owner'
+                description: 'Phone number of the pet parent'
               },
               email: {
                 type: 'string',
-                description: 'Email address of the pet owner'
+                description: 'Email address of the pet parent'
               },
               petName: {
                 type: 'string',

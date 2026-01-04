@@ -1,6 +1,6 @@
 # Pet Medical Consultation App
 
-A React-based web application for pet owners to conduct video consultations with AI-assisted diagnosis.
+A React-based web application for pet parents to conduct video consultations with AI-assisted diagnosis.
 
 ## Features
 
@@ -17,7 +17,7 @@ A React-based web application for pet owners to conduct video consultations with
 - **Demo Account**: `demo@petcare.com` / `demo123`
 
 ### 👤 User Profile Management
-- Save owner information (name, phone, email)
+- Save parent information (name, phone, email)
 - Manage multiple pet profiles
 - Quick-start consultations from saved pets
 - Edit/delete pet profiles
@@ -32,7 +32,7 @@ Each pet profile includes:
 
 ### 🤖 AI Consultation Assistant
 - **Chat with AI**: Natural conversation interface for pet health concerns
-- **Smart Information Collection**: AI gathers owner and pet details conversationally
+- **Smart Information Collection**: AI gathers parent and pet details conversationally
 - **Context-Aware**: Recognizes registered users and pre-fills information
 - **Multi-Language Support**: English, Chinese, and Swedish
 - **Appointment Creation**: Book appointments directly from chat

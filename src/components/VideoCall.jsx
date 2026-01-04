@@ -28,6 +28,7 @@ import {
   AudioMutedOutlined,
   DeleteOutlined,
 } from '@ant-design/icons';
+import { formatTimeWithLocale } from '../utils/dateUtils';
 import apiService from '../services/apiService';
 import { authService } from '../services/authService';
 
@@ -753,7 +754,9 @@ const VideoCall = () => {
     };
     
     setCapturedImages(prev => [...prev, newImage]);
-    message.info(t('videoCall.imageCaptured', { time: new Date(timestamp).toLocaleTimeString() }));
+    message.info(t('videoCall.imageCaptured', { 
+      time: formatTimeWithLocale(timestamp)
+    }));
   };
 
   const endConsultation = () => {
@@ -944,7 +947,7 @@ const VideoCall = () => {
                         justifyContent: 'space-between',
                         alignItems: 'center'
                       }}>
-                        <span>{new Date(img.timestamp).toLocaleTimeString()}</span>
+                        <span>{formatTimeWithLocale(img.timestamp)}</span>
                         <DeleteOutlined 
                           style={{ cursor: 'pointer', color: '#ff4d4f' }}
                           onClick={() => {
@@ -1062,7 +1065,7 @@ const VideoCall = () => {
                         marginTop: '4px',
                         opacity: 0.7
                       }}>
-                        {msg.timestamp?.toLocaleTimeString()}
+                        {formatTimeWithLocale(msg.timestamp)}
                       </div>
                     </div>
                   </div>

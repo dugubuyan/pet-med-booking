@@ -1,11 +1,10 @@
 import React from 'react';
+import { formatTimeWithLocale } from '../../utils/dateUtils';
 import './Message.css';
 
 const Message = ({ content, sender, timestamp, isError = false }) => {
   const formatTime = (date) => {
-    if (!date) return '';
-    const d = new Date(date);
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return formatTimeWithLocale(date, { hour: '2-digit', minute: '2-digit' });
   };
 
   return (

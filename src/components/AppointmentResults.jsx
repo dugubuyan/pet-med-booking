@@ -26,6 +26,7 @@ import {
   CheckCircleOutlined,
 } from '@ant-design/icons';
 import apiService from '../services/apiService';
+import { formatDateWithLocale, formatTimeWithLocale, formatDateTimeWithLocale } from '../utils/dateUtils';
 
 const { Title, Text, Paragraph } = Typography;
 
@@ -133,7 +134,8 @@ const AppointmentResults = () => {
     // If it's already in YYYY-MM-DD format, convert to readable format
     const date = new Date(dateStr);
     if (isNaN(date.getTime())) return dateStr; // Return as-is if invalid
-    return date.toLocaleDateString(undefined, { 
+    
+    return formatDateWithLocale(date, { 
       weekday: 'long', 
       year: 'numeric', 
       month: 'long', 
@@ -374,7 +376,7 @@ const AppointmentResults = () => {
                     {sessionData.transcription ? t('results.available') : t('results.notAvailable')}
                   </Descriptions.Item>
                   <Descriptions.Item label={t('results.completedAt')}>
-                    {new Date(sessionData.endTime).toLocaleString()}
+                    {formatDateTimeWithLocale(sessionData.endTime)}
                   </Descriptions.Item>
                 </Descriptions>
               </Card>
@@ -456,7 +458,7 @@ const AppointmentResults = () => {
                         <Text strong>{t('results.sessionCompleted')}</Text>
                         <br />
                         <Text type="secondary">
-                          {sessionData?.endTime ? new Date(sessionData.endTime).toLocaleString() : t('results.justNow')}
+                          {sessionData?.endTime ? formatDateTimeWithLocale(sessionData.endTime) : t('results.justNow')}
                         </Text>
                       </div>
                     ),
@@ -521,7 +523,7 @@ const AppointmentResults = () => {
                   />
                   <div style={{ padding: '8px', textAlign: 'center', background: '#fafafa' }}>
                     <Text type="secondary" style={{ fontSize: '12px' }}>
-                      {new Date(image.timestamp).toLocaleTimeString()}
+                      {formatTimeWithLocale(image.timestamp)}
                     </Text>
                   </div>
                 </div>

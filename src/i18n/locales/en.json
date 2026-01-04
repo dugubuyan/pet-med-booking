@@ -61,7 +61,7 @@
   },
   "cta": {
     "title": "Ready to Care for Your Pet?",
-    "subtitle": "Join thousands of pet owners who trust PetCare AI for their pet's health",
+    "subtitle": "Join thousands of pet parents who trust PetCare AI for their pet's health",
     "startConsultation": "Start Free Consultation",
     "createAccount": "Create Free Account"
   },
@@ -90,7 +90,7 @@
     "welcomeBack": "Welcome back, {{name}}!",
     "infoPreFilled": "Your information is pre-filled.",
     "manageProfile": "Manage Profile",
-    "ownerInfo": "Pet Owner Information",
+    "ownerInfo": "Pet Parent Information",
     "fullName": "Full Name",
     "enterFullName": "Enter your full name",
     "pleaseEnterName": "Please enter your full name",
@@ -203,7 +203,7 @@
     "noAppointmentId": "No appointment ID provided",
     "appointmentNotFound": "Appointment not found",
     "failedToLoad": "Failed to load appointment details",
-    "ownerInfo": "Pet Owner Information",
+    "ownerInfo": "Pet Parent Information",
     "name": "Name",
     "guestUser": "Guest User",
     "notProvided": "Not provided",

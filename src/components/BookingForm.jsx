@@ -41,7 +41,7 @@ const BookingForm = () => {
     const currentUser = authService.getCurrentUser();
     if (currentUser) {
       setUser(currentUser);
-      // Pre-fill owner information
+      // Pre-fill parent information
       form.setFieldsValue({
         ownerName: currentUser.fullName,
         phone: currentUser.phone,
